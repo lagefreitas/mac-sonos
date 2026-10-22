@@ -4,6 +4,7 @@ The CLI, the menu bar app and any future panel are clients of this class. Comman
 progress shows up in `state` (and through `on_change`), so a UI thread never blocks on the network.
 """
 import contextlib
+import logging
 import queue
 import threading
 import time
@@ -11,6 +12,8 @@ from dataclasses import dataclass, field
 
 from .core import output, session as session_mod
 from .sonos import discovery
+
+log = logging.getLogger("mac_sonos")
 
 STOPPED, CONNECTING, STREAMING, ERROR = "stopped", "connecting", "streaming", "error"
 
@@ -68,6 +71,7 @@ class Controller:
     # --- worker thread --------------------------------------------------------------------------
 
     def _set(self, **changes):
+        log.info("state: %s", {k: v for k, v in changes.items() if v is not None})
         with self._cond:
             for k, v in changes.items():
                 setattr(self.state, k, v)
@@ -81,6 +85,7 @@ class Controller:
             try:
                 getattr(self, "_do_" + name)(**kwargs)
             except Exception as e:  # keep the worker alive whatever a command does
+                log.exception("%s failed", name)
                 self._teardown()
                 self._set(status=ERROR, error=str(e))
 

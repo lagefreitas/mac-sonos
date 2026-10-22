@@ -4,6 +4,7 @@ Each Sonos connection gets its own capture and ffmpeg, so a stream always starts
 ffmpeg's own avfoundation capture drops chunks of audio (vinyl crackle), so PortAudio captures
 and feeds ffmpeg through a pipe.
 """
+import logging
 import queue
 import subprocess
 import threading
@@ -14,14 +15,22 @@ import sounddevice as sd
 
 from .formats import FORMATS, RATE, ffmpeg_cmd
 
+log = logging.getLogger("mac_sonos")
+
 
 class StreamHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         cfg = self.server.cfg
-        self.server.gets.append(time.time())
+        t0 = time.time()
+        self.server.gets.append(t0)
         pcm = queue.Queue(maxsize=500)
+        first = []
+        sent = 0
+        log.info("stream: GET from %s", self.client_address[0])
 
         def on_audio(indata, frames, t, status):
+            if not first:
+                first.append(time.time() - t0)
             try:
                 pcm.put_nowait(bytes(indata))
             except queue.Full:
@@ -46,10 +55,17 @@ class StreamHandler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
                 while chunk := ff.stdout.read1(4096):
+                    if not sent:
+                        log.info("stream: first bytes after %.2fs (capture started after %s)", time.time() - t0,
+                                 "%.2fs" % first[0] if first else "never")
                     self.wfile.write(chunk)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+                    sent += len(chunk)
+        except (BrokenPipeError, ConnectionResetError) as e:
+            log.info("stream: client closed (%s)", type(e).__name__)
+        except Exception:
+            log.exception("stream: failed")
         finally:
+            log.info("stream: ended after %.1fs, %d bytes sent", time.time() - t0, sent)
             pcm.put(None)
             ff.kill()
 

@@ -9,7 +9,7 @@ from .. import config
 from ..controller import CONNECTING, STREAMING, Controller
 from ..core import output
 from ..sonos import discovery
-from . import model
+from . import loginitem, model
 
 
 class MenuBarApp(rumps.App):
@@ -35,10 +35,11 @@ class MenuBarApp(rumps.App):
         for f in model.FORMAT_CHOICES:
             self.format_menu.add(rumps.MenuItem(f, callback=self.on_format))
         self.autostart_item = rumps.MenuItem("Ligar ao abrir", callback=self.on_autostart)
+        self.login_item = rumps.MenuItem("Abrir no login", callback=self.on_login_item)
         self.menu = [
             self.status_item, self.warning_item, self.toggle_item, None,
             self.rooms_menu, self.volume_menu, self.format_menu, None,
-            self.autostart_item, rumps.MenuItem("Atualizar cômodos", callback=self.on_refresh),
+            self.autostart_item, self.login_item, rumps.MenuItem("Atualizar cômodos", callback=self.on_refresh),
             rumps.MenuItem("Sair", callback=self.on_quit),
         ]
         self._refresh_checks()
@@ -92,6 +93,17 @@ class MenuBarApp(rumps.App):
         self.cfg["autostart_stream"] = not self.cfg["autostart_stream"]
         self._save()
 
+    def on_login_item(self, _):
+        current = loginitem.status()
+        if current is None:
+            rumps.alert("Abrir no login", "Disponível só no Mac Sonos.app (veja build-app.sh).")
+            return
+        new = loginitem.set_enabled(current != loginitem.ENABLED)
+        if new == loginitem.REQUIRES_APPROVAL:
+            rumps.alert("Abrir no login", "Aprove o Mac Sonos em Ajustes do Sistema > Geral > "
+                                          "Itens de Início de Sessão.")
+        self._refresh_checks()
+
     def on_refresh(self, _):
         def work():
             try:
@@ -113,6 +125,7 @@ class MenuBarApp(rumps.App):
         for item in self.format_menu.values():
             item.state = int(item.title == self.cfg["format"])
         self.autostart_item.state = int(self.cfg["autostart_stream"])
+        self.login_item.state = int(loginitem.status() == loginitem.ENABLED)
 
     def _rebuild_rooms(self):
         if len(self.rooms_menu):  # rumps' clear() fails on a submenu that was never filled

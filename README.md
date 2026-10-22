@@ -56,10 +56,22 @@ Settings live in `~/Library/Application Support/mac-sonos/config.json` (rooms, v
 - If the capture device is not found, check the name with `python -m mac_sonos devices` and pass `--device`.
 - Mac and Sonos must be on the same network; allow incoming connections for Python/ffmpeg if macOS asks.
 
-## Run at login
+## The app (Mac Sonos.app)
 
-    ./autostart.sh install      # adds a Terminal login item that opens the menu bar app
-    ./autostart.sh uninstall    # removes it and stops the stream
+    ./build-app.sh         # builds ~/Applications/Mac Sonos.app, self-contained (no dependency on this folder)
+    open -g ~/Applications/"Mac Sonos.app"
 
-A launchd LaunchAgent does not work: macOS Local Network privacy blocks it ("No route to host" to the
-Sonos), while Terminal has the permission. Room, volume and format come from the menu (saved config).
+Open it once, then allow **Microphone** (it captures the BlackHole device) and, if asked, **Local Network**.
+Enable "Abrir no login" in its menu (or `./autostart.sh install`) to start it at every login.
+
+Notes:
+- The app is signed with a local self-signed identity (`make-signing-identity.sh`, kept in its own keychain under
+  `~/Library/Application Support/mac-sonos/signing`). An ad-hoc signature changes on every build, and macOS then
+  forgets the permissions. With the stable identity you allow them once, and they survive rebuilds.
+- It is a bundle (py2app) instead of running from this folder because the folder may live in iCloud Drive, which
+  is protected and can evict files.
+- Quit from the menu, or `pkill -TERM -f "Mac Sonos.app"`: that stops the stream and restores the Mac output.
+  Never `kill -9`.
+- Log: `~/Library/Logs/mac-sonos.log`. Debug commands run inside the bundle:
+  `"~/Applications/Mac Sonos.app/Contents/MacOS/Mac Sonos" login-item status`.
+- `./autostart.sh uninstall` removes the login item and stops the app.

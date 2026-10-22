@@ -1,5 +1,6 @@
 """Command line: list rooms, run the stream, benchmark latency."""
 import argparse
+import logging
 import os
 import signal
 import sys
@@ -47,8 +48,24 @@ def cmd_run(args):
         ctl.shutdown()
 
 
+def cmd_login_item(args):
+    from .ui import loginitem
+    names = {0: "not registered", 1: "enabled", 2: "requires approval (System Settings > General > Login Items)",
+             3: "not found"}
+    if args.action != "status":
+        loginitem.set_enabled(args.action == "enable")
+    code = loginitem.status()
+    print("n/a (not running from Mac Sonos.app)" if code is None else names[code])
+
+
+LOG_PATH = os.path.expanduser("~/Library/Logs/mac-sonos.log")
+
+
 def cmd_menubar(_):
     from .ui.menubar import MenuBarApp  # AppKit is only needed here
+    logging.basicConfig(filename=LOG_PATH, level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("mac_sonos").info("menu bar app starting")
     MenuBarApp().run()
 
 
@@ -118,6 +135,9 @@ def main():
     r.add_argument("--lowlat", action="store_true", help="low-latency ffmpeg input flags")
     r.add_argument("--volume", type=int, help="set Sonos volume (0-100) on start")
     r.set_defaults(fn=cmd_run)
+    li = sub.add_parser("login-item", help="open at login (only inside Mac Sonos.app)")
+    li.add_argument("action", choices=["status", "enable", "disable"])
+    li.set_defaults(fn=cmd_login_item)
     sub.add_parser("menubar", help="menu bar app").set_defaults(fn=cmd_menubar)
     b = sub.add_parser("bench", help="measure Sonos start-up buffer (latency) per stream config")
     b.add_argument("rooms", nargs="+")

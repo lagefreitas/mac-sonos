@@ -1,14 +1,16 @@
 #!/bin/sh
-# Start mac-sonos at login via a Terminal login item (Terminal already has the macOS
-# "Local Network" permission that a launchd job lacks). Usage: autostart.sh install|uninstall
-DIR="$(cd "$(dirname "$0")" && pwd)"
-CMD="$DIR/run-at-login.command"
+# Open Mac Sonos at login. Usage: autostart.sh install|uninstall
+# (The app can do the same from its menu: "Abrir no login".)
+APP="$HOME/Applications/Mac Sonos.app"
+BIN="$APP/Contents/MacOS/Mac Sonos"
 case "$1" in
   install)
-    chmod +x "$CMD"
-    osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$CMD\", hidden:true, name:\"mac-sonos\"}" ;;
+    [ -x "$BIN" ] || { echo "Build the app first: ./build-app.sh"; exit 1; }
+    "$BIN" login-item enable ;;
   uninstall)
-    osascript -e 'tell application "System Events" to delete login item "mac-sonos"'
-    pkill -f "mac_sonos (run|menubar)"; pkill -f run-at-login.command ;;
+    [ -x "$BIN" ] && "$BIN" login-item disable
+    # login item of the old Terminal-based setup, if still there
+    osascript -e 'tell application "System Events" to delete login item "run-at-login.command"' 2>/dev/null
+    pkill -f "Mac Sonos.app"; pkill -f "mac_sonos (run|menubar)"; pkill -f run-at-login.command ;;
   *) echo "usage: $0 install|uninstall"; exit 1 ;;
 esac

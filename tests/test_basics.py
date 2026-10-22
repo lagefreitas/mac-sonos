@@ -7,7 +7,7 @@ from unittest import mock
 from mac_sonos import config, controller
 from mac_sonos.core import output
 from mac_sonos.core.formats import FORMATS, ffmpeg_cmd
-from mac_sonos.ui import model
+from mac_sonos.ui import loginitem, model
 
 
 class FfmpegCmd(unittest.TestCase):
@@ -122,6 +122,12 @@ class MenuModel(unittest.TestCase):
 
     def test_every_volume_step_is_valid(self):
         self.assertTrue(all(0 < v <= 100 for v in model.VOLUME_STEPS))
+
+
+class LoginItem(unittest.TestCase):
+    def test_not_available_from_source(self):
+        self.assertIsNone(loginitem.status())
+        self.assertIsNone(loginitem.set_enabled(True))
 
 
 class FakeSession:

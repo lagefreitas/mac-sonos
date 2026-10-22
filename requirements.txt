@@ -1,3 +1,4 @@
 soco
 sounddevice==0.5.1
 rumps
+pyobjc-framework-ServiceManagement
