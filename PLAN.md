@@ -71,9 +71,13 @@ Vem cedo porque a permissão de Rede Local define se o resto funciona.
   playlist do Sonos, URL, e play/remover/limpar na fila. Limites: fila lida até 100 faixas; URLs de playlist (.m3u/.pls)
   não são suportadas; "Descubra o Sonos Radio" e artistas só pela nuvem (sprint 10).
 
-## Sprint 7: Sleep timer e alarmes
+## Sprint 7: Sleep timer e alarmes (FEITO)
 - Sleep timer por grupo (`get_sleep_timer`/`set_sleep_timer`); alarmes via `soco.alarms`.
 - Alarme roda no próprio Sonos, mas não serve para o Mac como fonte.
+- Feito: soneca nativa por grupo; para o stream do Mac, timer do app com fade de 30 s, parada limpa e volume restaurado
+  (`Controller.stop(volume=)`); alarmes (listar, criar, ativar, horário, repetição, volume, remover). Não feito: dias da
+  semana personalizados na criação (aparecem se criados no app do Sonos), som de alarme que não seja o toque padrão, e
+  persistir o timer do Mac entre reinícios do app.
 
 ## Sprint 8: Cenas e atalhos
 - Cenas em JSON (cômodos, volumes, EQ, fonte, stream do Mac). Teclas de mídia e atalhos globais (exigem permissão de Acessibilidade); modo liga/desliga.

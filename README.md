@@ -40,6 +40,17 @@ the group's queue (a window of 40 around the current track) with play and remove
 the queue, like "play now" in the Sonos app; radios start from the Sonos side and can take several seconds.
 Playing on a room that carries the Mac's stream replaces it (the icon turns ⏸; "Ligar" brings it back).
 
+**Soneca:** every group that is playing has a "Soneca" submenu (15 to 120 min, with the time left and "Cancelar").
+Normal groups use the speakers' own sleep timer. The Mac's own stream gets an app-side timer instead, because the
+Sonos one would cut it abruptly: the volume fades out over the last 30 s, the stream stops cleanly (the Mac output
+is restored) and the rooms' volume is put back. Cancelling during the fade undoes it. This timer lives in the app: it
+is lost if the app quits.
+
+**Alarmes:** list, create ("Novo alarme…" asks for HH:MM and uses the room chosen in "Tocar em"), turn on/off,
+change the time, repeat (every day, weekdays, weekends, once; custom weekday sets made in the Sonos app are shown too)
+and volume, remove. Alarms live in the speakers, play the Sonos chime and fire even if the Mac is off. They cannot
+play the Mac's audio.
+
 **Interrompido:** if someone stops the Mac stream outside this app, the icon turns ⏸, the status says
 "Interrompido no Sonos", and the main button becomes "Ligar" to start it again (nothing restarts by itself).
 

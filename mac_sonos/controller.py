@@ -47,8 +47,9 @@ class Controller:
         self._queue.put(("start", dict(rooms=list(rooms), device=device, fmt=fmt, port=port,
                                        bitrate=bitrate, lowlat=lowlat, volume=volume)))
 
-    def stop(self):
-        self._queue.put(("stop", {}))
+    def stop(self, volume=None):
+        """Stop streaming; with `volume`, set the rooms to it afterwards (e.g. undo a fade-out)."""
+        self._queue.put(("stop", {"volume": volume}))
 
     def set_volume(self, volume):
         """Change the volume of the streaming rooms; remembered for the next start."""
@@ -110,11 +111,15 @@ class Controller:
             for speaker in self._session.rooms:
                 speaker.volume = volume
 
-    def _do_stop(self):
+    def _do_stop(self, volume=None):
         had_session = self._session is not None
+        rooms = list(self._session.rooms) if had_session and volume is not None else []  # to restore after
         self._teardown()
         if had_session or self.state.status in (CONNECTING, STREAMING):
             self._set(status=STOPPED, url=None)
+        if volume is not None:
+            for speaker in rooms:
+                speaker.volume = volume
 
     def _teardown(self):
         session, stack, self._session, self._stack = self._session, self._stack, None, None

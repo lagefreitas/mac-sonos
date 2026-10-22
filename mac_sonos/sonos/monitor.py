@@ -61,10 +61,22 @@ class GroupInfo:
     duration: int = 0       # seconds, 0 for streams
     actions: frozenset = frozenset()
     levels: tuple = ()      # (room, volume, muted) per member; volume is None if unreadable
+    sleeping: bool = False  # a Sonos sleep timer is running (setting or cancelling it is a change)
     queue_position: int = 0  # 1-based position of the current track in the queue (0: unknown)
     # volatile: they change every second and must not count as a change
     position: int = field(default=0, compare=False)
     read_at: float = field(default=0.0, compare=False)
+    sleep_remaining: int = field(default=None, compare=False)  # seconds left at `read_at`; ticks every second
+
+    @property
+    def sleep_active(self):
+        return self.sleeping
+
+    def sleep_left(self, now=None):
+        """Seconds left on the sleep timer as of `now` (it was `sleep_remaining` at `read_at`), or None."""
+        if self.sleep_remaining is None:
+            return None
+        return max(0, self.sleep_remaining - int((now or time.time()) - self.read_at))
 
     def current_position(self, now=None):
         if self.state != PLAYING:
@@ -84,6 +96,15 @@ def read_levels(zones):
     return tuple(levels)
 
 
+def read_sleep_timer(coordinator):
+    """Seconds left on the group's sleep timer, or None (no timer, or unreadable)."""
+    try:
+        left = coordinator.get_sleep_timer()
+        return int(left) if left is not None else None
+    except Exception:
+        return None
+
+
 def read_group(coordinator, members, now=None, zones=()):
     """Read the playback state of one group from its coordinator (and the volume of its rooms)."""
     state = coordinator.get_current_transport_info()["current_transport_state"]
@@ -95,13 +116,15 @@ def read_group(coordinator, members, now=None, zones=()):
         actions = parse_actions(coordinator.available_actions)
     except Exception:
         actions = frozenset()
+    sleep_left = read_sleep_timer(coordinator) if state == PLAYING else None
     return GroupInfo(
         coordinator=coordinator.player_name, members=tuple(members), state=state,
         title=track.get("title", ""), artist=track.get("artist", ""), album=track.get("album", ""),
         art_url=track.get("album_art", ""), uri=track.get("uri", ""), channel=channel,
         duration=parse_hms(track.get("duration")), actions=actions, levels=read_levels(zones),
         queue_position=int(track.get("playlist_position") or 0) if str(track.get("playlist_position") or "0").isdigit() else 0,
-        position=parse_hms(track.get("position")), read_at=now or time.time())
+        position=parse_hms(track.get("position")), read_at=now or time.time(),
+        sleep_remaining=sleep_left, sleeping=sleep_left is not None)
 
 
 @dataclass(frozen=True)
@@ -180,6 +203,15 @@ class Monitor:
             group = self._groups.get(coordinator)
             return group.coordinator if group else None
 
+    def zone_for_room(self, room):
+        """The visible SoCo of a room (stereo pairs: not the hidden one), or None."""
+        with self._lock:
+            for group in self._groups.values():
+                for zone in group.zones:
+                    if zone.player_name == room:
+                        return zone
+        return None
+
     def any_zone(self):
         with self._lock:
             return next((g.coordinator for g in self._groups.values()), None)
@@ -196,7 +228,7 @@ class Monitor:
 
     def command(self, coordinator, action, arg=None):
         """Queue a group command: play/pause/next/previous/stop, seek (absolute seconds), seek_by (relative
-        seconds), volume_by (relative, every room of the group) or partymode (join everyone to the group)."""
+        seconds), sleep (arg: minutes) / sleep_cancel (the Sonos sleep timer), volume_by (relative, every room of the group) or partymode (join everyone to the group)."""
         self._commands.put(("group", coordinator, action, arg))
 
     def room_command(self, room, action, arg=None):
@@ -401,6 +433,10 @@ class Monitor:
                 z.volume = clamp_volume(z.volume + arg)
         elif action == "partymode":
             zone.partymode()
+        elif action == "sleep":
+            zone.set_sleep_timer(int(arg) * 60)  # arg: minutes
+        elif action == "sleep_cancel":
+            zone.set_sleep_timer(None)
         elif action == "refresh":
             pass  # nothing to send: the caller changed the group by other means and wants it re-read
         elif action in ("play", "pause", "next", "previous", "stop"):

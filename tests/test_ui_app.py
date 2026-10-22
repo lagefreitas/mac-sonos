@@ -1,7 +1,9 @@
 """The menu bar app itself, instantiated headless (needs macOS + rumps): python -m unittest discover tests"""
+import datetime
 import json
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -13,7 +15,8 @@ try:
 except Exception:  # pragma: no cover - not on macOS
     HAVE_UI = False
 
-from mac_sonos import config, i18n
+from mac_sonos import config, controller, i18n
+from mac_sonos.sonos.alarms import AlarmInfo
 from mac_sonos.sonos.library import Favorite, PLAYLIST, QueueEntry, RADIO, TRACK
 from mac_sonos.sonos.monitor import GroupInfo, Monitor, PLAYING, RoomSettings, STOPPED
 
@@ -45,6 +48,7 @@ class AppTests(unittest.TestCase):
         app = menubar.MenuBarApp()
         self.addCleanup(app.ctl.shutdown)
         self.addCleanup(app.library.stop)
+        self.addCleanup(app.alarm_manager.stop)
         return app
 
     def top_titles(self, app):
@@ -186,6 +190,221 @@ class AppTests(unittest.TestCase):
             app.groups = [GroupInfo(**{**app.groups[0].__dict__, "queue_position": 1}), app.groups[1]]
             app._tick(None)  # another track is current: the queue marker moves
             self.assertEqual(rebuild.call_count, 2)
+
+    # --- sleep timer -----------------------------------------------------------------------------
+
+    MAC_URI = "x-rincon-mp3radio://http://10.0.0.2:8000/mac.mp3"
+
+    def sleep_groups(self, sleeping=False, mac=False, volume=20):
+        now = time.time()
+        if mac:
+            return [GroupInfo("Office", ("Office",), PLAYING, uri=self.MAC_URI, channel="Mac",
+                              levels=(("Office", volume, False),), read_at=now)]
+        return [GroupInfo("TV Room", ("TV Room",), PLAYING, title="Song", artist="Band", uri="x-sonos-spotify:1",
+                          sleeping=sleeping, sleep_remaining=600 if sleeping else None, read_at=now)]
+
+    def sleep_menu(self, app, header_title):
+        header = self.children(app.now_menu)[header_title]
+        return header, self.children(self.children(header)["Soneca"])
+
+    def test_sleep_on_a_normal_group_uses_the_native_timer(self):
+        app = self.make_app()
+        app.monitor.command = mock.Mock()
+        app.groups = self.sleep_groups()
+        app._tick(None)
+        _, menu = self.sleep_menu(app, "▶ TV Room")
+        self.assertEqual(list(menu), ["15 min", "30 min", "45 min", "60 min", "90 min", "120 min"])
+        menu["30 min"].callback(None)
+        app.monitor.command.assert_called_with("TV Room", "sleep", 30)
+        self.assertIsNone(app.mac_sleep)
+
+    def test_a_running_native_timer_shows_the_time_left_and_can_be_cancelled(self):
+        app = self.make_app()
+        app.monitor.command = mock.Mock()
+        app.groups = self.sleep_groups(sleeping=True)
+        app._tick(None)
+        _, menu = self.sleep_menu(app, "▶ TV Room")
+        self.assertTrue(any(t.startswith("Restam 9:") or t.startswith("Restam 10:") for t in menu))
+        menu["Cancelar soneca"].callback(None)
+        app.monitor.command.assert_called_with("TV Room", "sleep_cancel")
+
+    def test_menu_is_rebuilt_when_the_native_timer_starts_but_not_while_it_counts(self):
+        app = self.make_app()
+        app.groups = self.sleep_groups()
+        app._tick(None)
+        with mock.patch.object(app, "_rebuild_now", wraps=app._rebuild_now) as rebuild:
+            app._tick(None)
+            self.assertEqual(rebuild.call_count, 0)
+            app.groups = self.sleep_groups(sleeping=True)
+            app._tick(None)
+            self.assertEqual(rebuild.call_count, 1)
+            app.groups = [GroupInfo(**{**app.groups[0].__dict__, "sleep_remaining": 590})]
+            app._tick(None)  # counting down: only the label text changes
+            self.assertEqual(rebuild.call_count, 1)
+
+    def mac_app(self, volume=20):
+        app = self.make_app()
+        app.ctl.set_volume, app.ctl.stop = mock.Mock(), mock.Mock()
+        app.groups = self.sleep_groups(mac=True, volume=volume)
+        app.ctl.state.status, app.ctl.state.rooms, app.ctl.state.started_at = controller.STREAMING, ["Office"], 0.0
+        app._tick(None)
+        return app
+
+    def at(self, now):
+        return mock.patch.object(menubar, "time", SimpleNamespace(time=lambda: now))
+
+    def test_the_macs_own_stream_gets_an_app_side_timer_with_the_current_volume(self):
+        app = self.mac_app(volume=23)
+        _, menu = self.sleep_menu(app, "▶ Office")
+        menu["1 min" if "1 min" in menu else "15 min"].callback(None)
+        self.assertIsNotNone(app.mac_sleep)
+        self.assertEqual(app.mac_sleep.base_volume, 23)
+        self.assertEqual(app.mac_sleep.deadline - app.mac_sleep.started, 15 * 60)
+
+    def test_fade_then_stop_then_volume_restored(self):
+        app = self.mac_app(volume=20)
+        app.mac_sleep = menubar.model.SleepTimer(1, 20, now=1000.0)  # 60 s
+        for now, expect in ((1010.0, None), (1030.0, 20), (1045.0, 10), (1058.0, 1)):
+            app.ctl.set_volume.reset_mock()
+            with self.at(now):
+                app._tick_mac_sleep()
+            if expect is None:
+                app.ctl.set_volume.assert_not_called()
+            else:
+                app.ctl.set_volume.assert_called_once_with(expect)
+        with self.at(1045.0):   # same volume again: not re-sent
+            app.ctl.set_volume.reset_mock()
+            app._tick_mac_sleep()
+            app._tick_mac_sleep()
+            self.assertLessEqual(app.ctl.set_volume.call_count, 1)
+        with self.at(1060.5):
+            app._tick_mac_sleep()
+        app.ctl.stop.assert_called_once_with(volume=20)
+        self.assertIsNone(app.mac_sleep)
+        self.assertFalse(app.want_stream)
+
+    def test_cancelling_during_the_fade_restores_the_volume_but_not_before(self):
+        app = self.mac_app(volume=20)
+        app.mac_sleep = menubar.model.SleepTimer(1, 20, now=1000.0)
+        app._cancel_mac_sleep()  # no fade yet: nothing to undo
+        app.ctl.set_volume.assert_not_called()
+        app.mac_sleep = menubar.model.SleepTimer(1, 20, now=1000.0)
+        with self.at(1050.0):
+            app._tick_mac_sleep()
+        app.ctl.set_volume.reset_mock()
+        app._cancel_mac_sleep()
+        app.ctl.set_volume.assert_called_once_with(20)
+        self.assertIsNone(app.mac_sleep)
+
+    def test_timer_is_dropped_when_the_stream_is_gone(self):
+        app = self.mac_app()
+        app.mac_sleep = menubar.model.SleepTimer(5, 20, now=1000.0)
+        app.ctl.state.status = controller.STOPPED
+        with self.at(1002.0):
+            app._tick_mac_sleep()
+        self.assertIsNotNone(app.mac_sleep)   # a few seconds of grace: the stream may be restarting
+        with self.at(1010.0):
+            app._tick_mac_sleep()
+        self.assertIsNone(app.mac_sleep)
+        app.ctl.stop.assert_not_called()
+
+    # --- alarms ----------------------------------------------------------------------------------
+
+    def alarm_app(self):
+        app = self.make_app()
+        app.alarm_manager.alarms = [AlarmInfo("1", "Office", datetime.time(6, 30), "WEEKDAYS", True, 20),
+                                    AlarmInfo("2", "TV Room", datetime.time(23, 0), "ON_06", False, 10)]
+        app.alarm_manager.version += 1
+        for name in ("add", "change", "remove"):
+            setattr(app.alarm_manager, name, mock.Mock())
+        app.groups = self.groups()
+        app._tick(None)
+        return app
+
+    def test_alarms_menu_structure_and_state(self):
+        app = self.alarm_app()
+        top = self.children(app.alarms_menu)
+        self.assertEqual(list(top), ["06:30 · Office · Dias úteis", "23:00 · TV Room · Dom, Sáb", "Novo alarme…"])
+        self.assertEqual(top["06:30 · Office · Dias úteis"].state, 1)
+        self.assertEqual(top["23:00 · TV Room · Dom, Sáb"].state, 0)
+        one = self.children(top["06:30 · Office · Dias úteis"])
+        self.assertEqual(list(one), ["Ativado", "Horário…", "Repetir", "Volume: 20%", "Volume +5", "Volume −5", "Remover alarme"])
+        repeat = self.children(one["Repetir"])
+        self.assertEqual({k: v.state for k, v in repeat.items()},
+                         {"Todos os dias": 0, "Dias úteis": 1, "Fins de semana": 0, "Uma vez": 0})
+
+    def test_alarm_actions(self):
+        app = self.alarm_app()
+        one = self.children(self.children(app.alarms_menu)["06:30 · Office · Dias úteis"])
+        two = self.children(self.children(app.alarms_menu)["23:00 · TV Room · Dom, Sáb"])
+        m = app.alarm_manager
+        one["Ativado"].callback(None)
+        m.change.assert_called_with("1", enabled=False)       # it was on
+        two["Ativado"].callback(None)
+        m.change.assert_called_with("2", enabled=True)        # it was off
+        self.children(one["Repetir"])["Fins de semana"].callback(None)
+        m.change.assert_called_with("1", recurrence="WEEKENDS")
+        one["Volume +5"].callback(None)
+        m.change.assert_called_with("1", volume=25)
+        two["Volume −5"].callback(None)
+        m.change.assert_called_with("2", volume=5)
+        one["Remover alarme"].callback(None)
+        m.remove.assert_called_with("1")
+
+    def test_alarm_volume_is_kept_within_bounds(self):
+        app = self.alarm_app()
+        app.alarm_manager.alarms = [AlarmInfo("9", "Office", datetime.time(7, 0), "DAILY", True, 98),
+                                    AlarmInfo("8", "Office", datetime.time(8, 0), "DAILY", True, 2)]
+        app.alarm_manager.version += 1
+        app._tick(None)
+        top = self.children(app.alarms_menu)
+        self.children(top["07:00 · Office · Todos os dias"])["Volume +5"].callback(None)
+        app.alarm_manager.change.assert_called_with("9", volume=100)
+        self.children(top["08:00 · Office · Todos os dias"])["Volume −5"].callback(None)
+        app.alarm_manager.change.assert_called_with("8", volume=0)
+
+    def test_new_alarm_dialog(self):
+        app = self.alarm_app()
+        with mock.patch.object(app, "_ask", return_value="7:15"):
+            app.on_alarm_new(None)
+        app.alarm_manager.add.assert_called_once_with("Office", datetime.time(7, 15))
+        app.alarm_manager.add.reset_mock()
+        with mock.patch.object(app, "_ask", return_value="quase sete"), mock.patch.object(rumps, "alert") as alert:
+            app.on_alarm_new(None)
+        alert.assert_called_once()
+        with mock.patch.object(app, "_ask", return_value=None):
+            app.on_alarm_new(None)
+        app.alarm_manager.add.assert_not_called()
+
+    def test_new_alarm_goes_to_the_play_target_room(self):
+        app = self.alarm_app()
+        app.cfg["play_target"] = "TV Room"
+        with mock.patch.object(app, "_ask", return_value="22:00") as ask:
+            app.on_alarm_new(None)
+        self.assertIn("TV Room", ask.call_args.args[0])
+        app.alarm_manager.add.assert_called_once_with("TV Room", datetime.time(22, 0))
+
+    def test_change_alarm_time_dialog(self):
+        app = self.alarm_app()
+        info = app.alarm_manager.alarms[0]
+        with mock.patch.object(app, "_ask", return_value="06:45") as ask:
+            app.on_alarm_time(info)
+        self.assertEqual(ask.call_args.args[1], "06:30")   # the current time is the default
+        app.alarm_manager.change.assert_called_once_with("1", start_time=datetime.time(6, 45))
+
+    def test_alarms_menu_rebuilds_only_when_the_alarms_change(self):
+        app = self.alarm_app()
+        with mock.patch.object(app, "_rebuild_alarms", wraps=app._rebuild_alarms) as rebuild:
+            app._tick(None)
+            app._tick(None)
+            self.assertEqual(rebuild.call_count, 0)
+            app.alarm_manager.version += 1
+            app._tick(None)
+            self.assertEqual(rebuild.call_count, 1)
+
+    def test_empty_alarm_list(self):
+        app = self.make_app()
+        self.assertEqual(list(self.children(app.alarms_menu)), ["Nenhum alarme", "Novo alarme…"])
 
     def test_language_menu_is_hidden_with_a_single_language(self):
         app = self.make_app()

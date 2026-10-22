@@ -11,6 +11,7 @@ from ..controller import CONNECTING, STREAMING, Controller
 from ..core import output
 from ..i18n import t
 from ..sonos import art, discovery
+from ..sonos.alarms import AlarmManager, parse_time
 from ..sonos.library import Library, default_title as library_default_title, valid_stream_url
 from ..sonos.monitor import Monitor
 from . import loginitem, model
@@ -34,6 +35,11 @@ class MenuBarApp(rumps.App):
         self.library = Library(self.monitor.zone_for_group, self.monitor.any_zone,
                                refresh_group=lambda group: self.monitor.command(group, "refresh"))
         self._library_key = None
+        self.alarm_manager = AlarmManager(self.monitor.any_zone, self.monitor.zone_for_room)
+        self._alarms_key = None
+        self.mac_sleep = None       # SleepTimer for the Mac's own stream, while one is running
+        self._last_fade = None
+        self._sleep_items = {}      # coordinator -> menu item showing the time left
         self._now_key = None
         self._time_items = {}   # coordinator -> menu item showing the position
         self._art_pending = set()
@@ -63,11 +69,12 @@ class MenuBarApp(rumps.App):
         self.autostart_item = self._static_item("menu.autostart", self.on_autostart)
         self.login_item = self._static_item("menu.login", self.on_login_item)
         self.library_menu = self._static_item("menu.library")
+        self.alarms_menu = self._static_item("menu.alarms")
         self.language_menu = self._static_item("menu.language")
         self._rebuild_languages()
         self.menu = [
             self.status_item, self.warning_item, self.toggle_item, self.track_item, None,
-            self.now_menu, self.house_menu, self.library_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
+            self.now_menu, self.house_menu, self.library_menu, self.alarms_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
             self.autostart_item, self.bar_item, self.login_item, *([self.language_menu] if len(self.language_menu) else []),
             self._static_item("menu.refresh", self.on_refresh), self._static_item("menu.quit", self.on_quit),
         ]
@@ -76,9 +83,11 @@ class MenuBarApp(rumps.App):
         self._rebuild_now([])
         self._rebuild_house()
         self._rebuild_library()
+        self._rebuild_alarms()
         self.on_refresh(None)
         self.monitor.start()
         self.library.start()
+        self.alarm_manager.start()
         signal.signal(signal.SIGTERM, lambda *_: self.on_quit(None))  # runs on the next timer tick
         self.timer = rumps.Timer(self._tick, 1)
         self.timer.start()
@@ -110,7 +119,7 @@ class MenuBarApp(rumps.App):
             item.title = t(key)
         self._rebuild_languages()
         self._rebuild_rooms()
-        self._now_key = self._house_key = self._library_key = None  # rebuilt by the next tick, new language
+        self._now_key = self._house_key = self._library_key = self._alarms_key = None  # next tick rebuilds, new language
 
     # --- actions --------------------------------------------------------------------------------
 
@@ -184,6 +193,8 @@ class MenuBarApp(rumps.App):
 
     def on_quit(self, _):
         self.timer.stop()
+        self._cancel_mac_sleep()
+        self.alarm_manager.stop()
         self.library.stop()
         self.monitor.stop()
         self.ctl.shutdown()  # stops the stream and restores the Mac output
@@ -224,7 +235,7 @@ class MenuBarApp(rumps.App):
     def _rebuild_now(self, active):
         if len(self.now_menu):
             self.now_menu.clear()
-        self._time_items = {}
+        self._time_items, self._sleep_items = {}, {}
         if not active:
             self.now_menu.add(rumps.MenuItem(t("now.nothing")))
             return
@@ -239,6 +250,7 @@ class MenuBarApp(rumps.App):
             header.add(None)
             for key, label in model.controls(g):
                 header.add(rumps.MenuItem(label, callback=lambda _, c=g.coordinator, k=key: self._transport(c, k)))
+            header.add(self._sleep_menu(g))
             cover = art.cached(g.art_url)
             if cover:
                 header.set_icon(str(cover), dimensions=(18, 18))
@@ -318,6 +330,126 @@ class MenuBarApp(rumps.App):
                 text = model.level_text(volume, muted)
                 item.title, label.title = f"{room}  ·  {text}", t("house.volume_label", level=text)
 
+    # --- sleep timer ----------------------------------------------------------------------------
+
+    def _sleep_left(self, group):
+        if model.is_mac_stream(group):
+            return self.mac_sleep.remaining(time.time()) if self.mac_sleep else None
+        return group.sleep_left(time.time())
+
+    def _sleep_menu(self, group):
+        menu = rumps.MenuItem(t("sleep.title"))
+        left = self._sleep_left(group)
+        if left is not None:
+            label = rumps.MenuItem(model.sleep_text(left))
+            menu.add(label)
+            menu.add(None)
+            self._sleep_items[group.coordinator] = label
+        for n in model.SLEEP_MINUTES:
+            menu.add(rumps.MenuItem(t("sleep.minutes", n=n), callback=lambda _, g=group, n=n: self._sleep(g, n)))
+        if left is not None:
+            menu.add(None)
+            menu.add(rumps.MenuItem(t("sleep.cancel"), callback=lambda _, g=group: self._sleep_cancel(g)))
+        return menu
+
+    def _sleep(self, group, minutes):
+        if model.is_mac_stream(group):  # our own stream: fade out, stop cleanly, restore the volume
+            self._cancel_mac_sleep()
+            base = next((v for _, v, muted in group.levels if v is not None and not muted), self.cfg["volume"])
+            self.mac_sleep = model.SleepTimer(minutes, base, time.time())
+            self._now_key = None
+        else:
+            self.monitor.command(group.coordinator, "sleep", minutes)
+
+    def _sleep_cancel(self, group):
+        if model.is_mac_stream(group):
+            self._cancel_mac_sleep()
+            self._now_key = None
+        else:
+            self.monitor.command(group.coordinator, "sleep_cancel")
+
+    def _cancel_mac_sleep(self):
+        if self.mac_sleep and self._last_fade is not None:  # in the middle of the fade: undo it
+            self.ctl.set_volume(self.mac_sleep.base_volume)
+        self.mac_sleep, self._last_fade = None, None
+
+    def _tick_mac_sleep(self):
+        timer, now = self.mac_sleep, time.time()
+        if timer is None:
+            return
+        if self.ctl.state.status != STREAMING and now - timer.started > 5:  # the stream went away: no timer
+            self.mac_sleep, self._last_fade, self._now_key = None, None, None
+        elif timer.expired(now):
+            log.info("sleep timer: stopping the stream")
+            self.mac_sleep, self._last_fade, self._now_key = None, None, None
+            self.want_stream = False
+            self.ctl.stop(volume=timer.base_volume)
+        else:
+            volume = timer.fade_volume(now)
+            if volume is not None and volume != self._last_fade:
+                self._last_fade = volume
+                self.ctl.set_volume(volume)
+
+    # --- alarms ---------------------------------------------------------------------------------
+
+    def on_alarm_new(self, _):
+        room = model.target_room_name(self.groups, self.cfg["rooms"], self.cfg["play_target"])
+        text = self._ask(t("alarm.time_prompt", room=room), "07:00", title=t("menu.alarms"))
+        if text is None:
+            return
+        value = parse_time(text)
+        if value is None:
+            rumps.alert(t("menu.alarms"), t("alarm.invalid_time"))
+        elif room:
+            self.alarm_manager.add(room, value)
+
+    def on_alarm_time(self, info):
+        from ..sonos.alarms import format_time
+        text = self._ask(t("alarm.new_time_prompt"), format_time(info.time), title=t("menu.alarms"))
+        if text is None:
+            return
+        value = parse_time(text)
+        if value is None:
+            rumps.alert(t("menu.alarms"), t("alarm.invalid_time"))
+        else:
+            self.alarm_manager.change(info.alarm_id, start_time=value)
+
+    def _rebuild_alarms(self):
+        menu, manager, d = self.alarms_menu, self.alarm_manager, model.ALARM_VOLUME_DELTA
+        if len(menu):
+            menu.clear()
+        if not manager.alarms:
+            menu.add(rumps.MenuItem(t("alarm.none")))
+        for alarm in manager.alarms:
+            item = rumps.MenuItem(model.alarm_title(alarm))
+            item.state = int(alarm.enabled)
+            enabled = rumps.MenuItem(t("alarm.enabled"), callback=lambda _, a=alarm: manager.change(a.alarm_id, enabled=not a.enabled))
+            enabled.state = int(alarm.enabled)
+            item.add(enabled)
+            item.add(rumps.MenuItem(t("alarm.set_time"), callback=lambda _, a=alarm: self.on_alarm_time(a)))
+            repeat = rumps.MenuItem(t("alarm.repeat"))
+            for choice in model.RECURRENCE_CHOICES:
+                entry = rumps.MenuItem(model.recurrence_label(choice),
+                                       callback=lambda _, a=alarm, c=choice: manager.change(a.alarm_id, recurrence=c))
+                entry.state = int(alarm.recurrence == choice)
+                repeat.add(entry)
+            item.add(repeat)
+            item.add(None)
+            item.add(rumps.MenuItem(t("alarm.volume", volume=alarm.volume)))
+            item.add(rumps.MenuItem(t("alarm.volume_up", n=d), callback=lambda _, a=alarm: manager.change(a.alarm_id, volume=min(100, a.volume + d))))
+            item.add(rumps.MenuItem(t("alarm.volume_down", n=d), callback=lambda _, a=alarm: manager.change(a.alarm_id, volume=max(0, a.volume - d))))
+            item.add(None)
+            item.add(rumps.MenuItem(t("alarm.remove"), callback=lambda _, a=alarm: manager.remove(a.alarm_id)))
+            menu.add(item)
+        menu.add(None)
+        menu.add(rumps.MenuItem(t("alarm.new"), callback=self.on_alarm_new))
+
+    def _update_alarms(self):
+        key = self.alarm_manager.version
+        if key != self._alarms_key:
+            self._alarms_key = key
+            self._rebuild_alarms()
+
     # --- library: favorites, playlists, queue, radio URLs ---------------------------------------
 
     def _target(self):
@@ -334,9 +466,9 @@ class MenuBarApp(rumps.App):
         if target:
             getattr(self.library, action)(target.coordinator, *args)
 
-    def _ask(self, message, default=""):
+    def _ask(self, message, default="", title=None):
         """A one-line prompt; the text, or None if cancelled."""
-        window = rumps.Window(message=message, title=t("menu.radios"), default_text=default,
+        window = rumps.Window(message=message, title=title or t("menu.radios"), default_text=default,
                               ok=t("dialog.ok"), cancel=t("dialog.cancel"), dimensions=(380, 24))
         response = window.run()
         return response.text.strip() if response.clicked else None
@@ -455,7 +587,7 @@ class MenuBarApp(rumps.App):
     def _update_now(self):
         groups = self.groups
         active = [g for g in groups if model.is_active(g)]
-        key = model.structure_key(groups)
+        key = (model.structure_key(groups), self.mac_sleep is not None)
         if key != self._now_key or self._art_ready:
             self._now_key, self._art_ready = key, False
             self._rebuild_now(active)
@@ -463,6 +595,9 @@ class MenuBarApp(rumps.App):
             item = self._time_items.get(g.coordinator)
             if item:
                 item.title = model.time_text(g)
+            left = self._sleep_left(g)
+            if left is not None and g.coordinator in self._sleep_items:
+                self._sleep_items[g.coordinator].title = model.sleep_text(left)
         primary = model.primary_group(groups, self.cfg["rooms"])
         show = primary is not None and not model.is_mac_stream(primary)
         self.track_item._menuitem.setHidden_(not show)
@@ -493,6 +628,8 @@ class MenuBarApp(rumps.App):
         primary = self._update_now()
         self._update_house()
         self._update_library()
+        self._update_alarms()
+        self._tick_mac_sleep()
         icon = model.TITLES[model.INTERRUPTED if interrupted else state.status]
         self.title = model.bar_title(icon, primary) if self.cfg["track_in_bar"] else icon
         self.status_item.title = model.status_text(state, interrupted)

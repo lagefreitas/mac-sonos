@@ -135,7 +135,7 @@ def bar_title(icon, info, limit=28):
 
 def structure_key(groups):
     """Changes only when the now-playing submenu must be rebuilt (not for position ticks)."""
-    return tuple((g.coordinator, g.members, g.state, track_text(g), g.art_url, tuple(controls(g)))
+    return tuple((g.coordinator, g.members, g.state, track_text(g), g.art_url, tuple(controls(g)), g.sleep_active)
                  for g in groups if is_active(g))
 
 
@@ -298,3 +298,54 @@ def add_radio(saved, title, url):
 
 def remove_radio(saved, url):
     return [r for r in saved if r["url"] != url]
+
+
+# --- sleep timer ---------------------------------------------------------------------------------
+SLEEP_MINUTES = (15, 30, 45, 60, 90, 120)
+FADE_SECONDS = 30   # the Mac's own sleep timer lowers the volume over this long before stopping
+
+
+def sleep_text(seconds):
+    return t("sleep.remaining", time=format_time(seconds))
+
+
+class SleepTimer:
+    """Sleep timer for the Mac's own stream (Sonos' native one would cut it abruptly): fades the volume out
+    over the last FADE_SECONDS, then the app stops the stream and puts the volume back."""
+
+    def __init__(self, minutes, base_volume, now, fade=FADE_SECONDS):
+        self.deadline, self.base_volume, self.fade, self.started = now + minutes * 60, base_volume, fade, now
+
+    def remaining(self, now):
+        return max(0, int(round(self.deadline - now)))
+
+    def expired(self, now):
+        return now >= self.deadline
+
+    def fade_volume(self, now):
+        """The volume to set now, or None while the fade has not begun."""
+        left = self.deadline - now
+        if left > self.fade:
+            return None
+        return max(1, round(self.base_volume * max(left, 0) / self.fade))
+
+
+# --- alarms --------------------------------------------------------------------------------------
+RECURRENCE_KEYS = {"DAILY": "alarm.daily", "WEEKDAYS": "alarm.weekdays", "WEEKENDS": "alarm.weekends",
+                   "ONCE": "alarm.once"}
+RECURRENCE_CHOICES = ("DAILY", "WEEKDAYS", "WEEKENDS", "ONCE")
+DAY_KEYS = ("alarm.day.0", "alarm.day.1", "alarm.day.2", "alarm.day.3", "alarm.day.4", "alarm.day.5", "alarm.day.6")
+ALARM_VOLUME_DELTA = 5
+
+
+def recurrence_label(recurrence):
+    if recurrence in RECURRENCE_KEYS:
+        return t(RECURRENCE_KEYS[recurrence])
+    from ..sonos.alarms import days_of
+    days = days_of(recurrence)
+    return ", ".join(t(DAY_KEYS[d]) for d in days) if days else str(recurrence)
+
+
+def alarm_title(info):
+    from ..sonos.alarms import format_time as clock
+    return t("alarm.title", time=clock(info.time), room=info.room, repeat=recurrence_label(info.recurrence))
