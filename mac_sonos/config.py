@@ -10,6 +10,7 @@ DEFAULTS = {
     "format": "mp3",
     "device": "BlackHole 2ch",
     "port": 8000,
+    "autostart_stream": True,  # menu bar app: start streaming when it opens
 }
 
 

@@ -9,6 +9,6 @@ case "$1" in
     osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$CMD\", hidden:true, name:\"mac-sonos\"}" ;;
   uninstall)
     osascript -e 'tell application "System Events" to delete login item "mac-sonos"'
-    pkill -f "mac_sonos run"; pkill -f run-at-login.command ;;
+    pkill -f "mac_sonos (run|menubar)"; pkill -f run-at-login.command ;;
   *) echo "usage: $0 install|uninstall"; exit 1 ;;
 esac

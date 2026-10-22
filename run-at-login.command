@@ -1,8 +1,6 @@
 #!/bin/sh
-# Opened by Terminal at login (see autostart.sh). Retries until Wi-Fi/Sonos/BlackHole are ready.
+# Opened by Terminal at login (see autostart.sh): starts the menu bar app, which streams to the
+# saved rooms and retries by itself until Wi-Fi/Sonos/BlackHole are ready.
 cd "$(dirname "$0")"
 export PATH=/opt/homebrew/bin:/usr/local/bin:$PATH
-while true; do
-  .venv/bin/python -m mac_sonos run Office --volume 15
-  sleep 10
-done
+exec .venv/bin/python -m mac_sonos menubar

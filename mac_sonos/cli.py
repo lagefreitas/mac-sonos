@@ -47,6 +47,11 @@ def cmd_run(args):
         ctl.shutdown()
 
 
+def cmd_menubar(_):
+    from .ui.menubar import MenuBarApp  # AppKit is only needed here
+    MenuBarApp().run()
+
+
 # --- latency benchmark -------------------------------------------------------------------------
 # The source is live (1 s of audio per second), so the time Sonos waits between connecting to the
 # stream and reporting PLAYING is the depth of its start-up buffer, i.e. the latency it adds.
@@ -113,6 +118,7 @@ def main():
     r.add_argument("--lowlat", action="store_true", help="low-latency ffmpeg input flags")
     r.add_argument("--volume", type=int, help="set Sonos volume (0-100) on start")
     r.set_defaults(fn=cmd_run)
+    sub.add_parser("menubar", help="menu bar app").set_defaults(fn=cmd_menubar)
     b = sub.add_parser("bench", help="measure Sonos start-up buffer (latency) per stream config")
     b.add_argument("rooms", nargs="+")
     b.add_argument("--configs", nargs="+", choices=CONFIGS)

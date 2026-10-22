@@ -7,6 +7,7 @@ from unittest import mock
 from mac_sonos import config, controller
 from mac_sonos.core import output
 from mac_sonos.core.formats import FORMATS, ffmpeg_cmd
+from mac_sonos.ui import model
 
 
 class FfmpegCmd(unittest.TestCase):
@@ -84,6 +85,45 @@ class OutputSwitchRestore(unittest.TestCase):
         self.assertEqual(sets, ["BlackHole 2ch", "MacBook Air Speakers"])
 
 
+class MenuModel(unittest.TestCase):
+    def state(self, status, rooms=(), error=None):
+        return controller.State(status=status, rooms=list(rooms), error=error)
+
+    def test_status_text(self):
+        self.assertEqual(model.status_text(self.state("stopped")), "Parado")
+        self.assertEqual(model.status_text(self.state("streaming", ["Office", "TV Room"])),
+                         "Tocando em Office, TV Room")
+        self.assertIn("boom", model.status_text(self.state("error", error="boom")))
+
+    def test_toggle_label(self):
+        self.assertEqual(model.toggle_label("stopped"), "Ligar")
+        self.assertEqual(model.toggle_label("error"), "Ligar")
+        self.assertEqual(model.toggle_label("streaming"), "Desligar")
+        self.assertEqual(model.toggle_label("connecting"), "Desligar")
+
+    def test_toggle_room_keeps_leader_and_last_room(self):
+        self.assertEqual(model.toggle_room(["Office"], "TV Room"), ["Office", "TV Room"])
+        self.assertEqual(model.toggle_room(["Office", "TV Room"], "Office"), ["TV Room"])
+        self.assertEqual(model.toggle_room(["Office"], "Office"), ["Office"])
+
+    def test_room_choices_keeps_missing_selected(self):
+        self.assertEqual(model.room_choices(["A", "B"], ["B", "Gone"]), ["A", "B", "Gone"])
+
+    def test_volume_warning(self):
+        self.assertIsNone(model.volume_warning(100))
+        self.assertIsNone(model.volume_warning(None))
+        self.assertIn("31%", model.volume_warning(31))
+
+    def test_retry_only_after_error_and_delay(self):
+        self.assertTrue(model.should_retry("error", True, 11))
+        self.assertFalse(model.should_retry("error", True, 3))
+        self.assertFalse(model.should_retry("error", False, 99))
+        self.assertFalse(model.should_retry("streaming", True, 99))
+
+    def test_every_volume_step_is_valid(self):
+        self.assertTrue(all(0 < v <= 100 for v in model.VOLUME_STEPS))
+
+
 class FakeSession:
     instances = []
 
@@ -156,6 +196,23 @@ class ControllerStates(unittest.TestCase):
         st = self.ctl.wait_for(controller.ERROR, timeout=5)
         self.assertEqual(st.error, "no device")
         controller.output.require_device.side_effect = None
+        self.ctl.start(["Office"])
+        self.assertEqual(self.ctl.wait_for(controller.STREAMING, timeout=5).status, controller.STREAMING)
+
+    def test_set_volume_applies_to_streaming_rooms(self):
+        class Speaker:
+            volume = 0
+        self.ctl.start(["Office"])
+        self.ctl.wait_for(controller.STREAMING, timeout=5)
+        speaker = Speaker()
+        FakeSession.instances[0].rooms = [speaker]
+        self.ctl.set_volume(30)
+        self.ctl.stop()
+        self.ctl.wait_for(controller.STOPPED, timeout=5)
+        self.assertEqual(speaker.volume, 30)
+
+    def test_set_volume_without_session_is_harmless(self):
+        self.ctl.set_volume(30)
         self.ctl.start(["Office"])
         self.assertEqual(self.ctl.wait_for(controller.STREAMING, timeout=5).status, controller.STREAMING)
 

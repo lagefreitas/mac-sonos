@@ -10,7 +10,17 @@ Capture uses PortAudio, not ffmpeg's avfoundation input: the latter drops chunks
 
     ./setup.sh
 
-## Use
+## Menu bar app
+
+    .venv/bin/python -m mac_sonos menubar
+
+An icon in the menu bar (🔈 stopped, 🔄 connecting, 🔊 streaming, ⚠️ error) with: on/off, rooms (check several
+to group; the first is the leader), Sonos volume in steps (changes live), stream format, "Ligar ao abrir"
+(start streaming when the app opens), and Quit (stops the stream and restores the Mac output).
+It warns if the Mac volume is not 100% and retries by itself every 10 s after an error (Wi-Fi/Sonos/BlackHole
+not ready yet). Choices are saved in the config file below.
+
+## Command line
 
     .venv/bin/python -m mac_sonos list                      # find rooms
     .venv/bin/python -m mac_sonos run Office --volume 15    # stream to one room
@@ -48,8 +58,8 @@ Settings live in `~/Library/Application Support/mac-sonos/config.json` (rooms, v
 
 ## Run at login
 
-    ./autostart.sh install      # adds a Terminal login item that runs run-at-login.command
+    ./autostart.sh install      # adds a Terminal login item that opens the menu bar app
     ./autostart.sh uninstall    # removes it and stops the stream
 
 A launchd LaunchAgent does not work: macOS Local Network privacy blocks it ("No route to host" to the
-Sonos), while Terminal has the permission. To change room/volume, edit `run-at-login.command`.
+Sonos), while Terminal has the permission. Room, volume and format come from the menu (saved config).

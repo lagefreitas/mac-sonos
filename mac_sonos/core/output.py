@@ -28,6 +28,13 @@ def require_device(name):
             "`sudo killall coreaudiod` (or reboot); otherwise see `python -m mac_sonos devices`.")
 
 
+def mac_volume():
+    """The Mac's output volume (0-100), or None if it can't be read."""
+    out = subprocess.run(["osascript", "-e", "output volume of (get volume settings)"],
+                         capture_output=True, text=True).stdout.strip()
+    return int(out) if out.isdigit() else None
+
+
 class OutputSwitch:
     """Point the Mac output at the capture device; restore it on exit (needs SwitchAudioSource)."""
 

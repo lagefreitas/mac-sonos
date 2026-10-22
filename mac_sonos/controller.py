@@ -44,6 +44,10 @@ class Controller:
     def stop(self):
         self._queue.put(("stop", {}))
 
+    def set_volume(self, volume):
+        """Change the volume of the streaming rooms; remembered for the next start."""
+        self._queue.put(("set_volume", dict(volume=volume)))
+
     def shutdown(self):
         """Stop streaming, restore the Mac output and end the worker thread."""
         self._queue.put(("stop", {}))
@@ -90,6 +94,12 @@ class Controller:
         self._session = session_mod.Session(speakers, device, fmt, port, bitrate, lowlat, volume)
         url = self._session.start()
         self._set(status=STREAMING, url=url)
+
+    def _do_set_volume(self, volume):
+        if self._session:
+            self._session.volume = volume
+            for speaker in self._session.rooms:
+                speaker.volume = volume
 
     def _do_stop(self):
         had_session = self._session is not None
