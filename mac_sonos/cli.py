@@ -48,6 +48,27 @@ def cmd_run(args):
         ctl.shutdown()
 
 
+def cmd_nowplaying(_):
+    from .sonos.monitor import Monitor
+    from .ui import model
+
+    def show(groups):
+        print("-" * 60)
+        for g in groups:
+            print(f"{model.STATE_ICONS.get(g.state, '⏹')} {model.group_name(g):30} {model.track_text(g)} "
+                  f"[{model.time_text(g) or g.state}] actions={sorted(g.actions)}", flush=True)
+
+    monitor = Monitor(on_change=show)
+    monitor.start()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        monitor.stop()
+
+
 def cmd_login_item(args):
     from .ui import loginitem
     names = {0: "not registered", 1: "enabled", 2: "requires approval (System Settings > General > Login Items)",
@@ -63,7 +84,7 @@ LOG_PATH = os.path.expanduser("~/Library/Logs/mac-sonos.log")
 
 def cmd_menubar(_):
     from .ui.menubar import MenuBarApp  # AppKit is only needed here
-    logging.basicConfig(filename=LOG_PATH, level=logging.INFO,
+    logging.basicConfig(filename=LOG_PATH, encoding="utf-8", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("mac_sonos").info("menu bar app starting")
     MenuBarApp().run()
@@ -135,6 +156,7 @@ def main():
     r.add_argument("--lowlat", action="store_true", help="low-latency ffmpeg input flags")
     r.add_argument("--volume", type=int, help="set Sonos volume (0-100) on start")
     r.set_defaults(fn=cmd_run)
+    sub.add_parser("nowplaying", help="live view of what every Sonos group is playing").set_defaults(fn=cmd_nowplaying)
     li = sub.add_parser("login-item", help="open at login (only inside Mac Sonos.app)")
     li.add_argument("action", choices=["status", "enable", "disable"])
     li.set_defaults(fn=cmd_login_item)

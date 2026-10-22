@@ -11,6 +11,7 @@ DEFAULTS = {
     "device": "BlackHole 2ch",
     "port": 8000,
     "autostart_stream": True,  # menu bar app: start streaming when it opens
+    "track_in_bar": False,     # menu bar app: show the current track next to the icon
 }
 
 

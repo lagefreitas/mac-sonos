@@ -17,6 +17,12 @@ Capture uses PortAudio, not ffmpeg's avfoundation input: the latter drops chunks
 An icon in the menu bar (🔈 stopped, 🔄 connecting, 🔊 streaming, ⚠️ error) with: on/off, rooms (check several
 to group; the first is the leader), Sonos volume in steps (changes live), stream format, "Ligar ao abrir"
 (start streaming when the app opens), and Quit (stops the stream and restores the Mac output).
+**Agora tocando:** every Sonos group that is playing or paused (not just ours) gets an entry with the track,
+album, cover art, position and only the controls that group supports right now (previous, pause/play, next,
+−10 s, +30 s; a stream like ours offers none). A summary line shows the track of the featured group, and
+"Faixa na barra" puts it next to the icon. The state is refreshed from Sonos events (about 0.1 s) with polling
+as a fallback. `python -m mac_sonos nowplaying` prints the same live view in the terminal.
+
 It warns if the Mac volume is not 100% and retries by itself every 10 s after an error (Wi-Fi/Sonos/BlackHole
 not ready yet). Choices are saved in the config file below.
 
