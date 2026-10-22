@@ -107,6 +107,24 @@ laranja de microfone enquanto há stream. Um process tap captura o áudio do sis
 - Alternativa descartada por ora: ScreenCaptureKit (áudio apenas), que exige Gravação de Tela.
 - Se o protótipo falhar, manter o BlackHole e documentar o indicador como inevitável.
 
+**Resultado do protótipo (branch `sprint-11-process-tap`, macOS 27, PyObjC 12.2):** VIÁVEL.
+- Funciona: tap global estéreo (`CATapDescription` + `AudioHardwareCreateProcessTap`) exposto por um dispositivo agregado,
+  lido por IOProc (ctypes) ou pelo PortAudio, dentro do pacote assinado com identidade própria. Captura contínua: 47.923
+  quadros/s medidos em 20 s contra 48.000 esperados. Com `CATapMuted` a saída local fica muda enquanto o tap ouve, então
+  o Mac fica em silêncio sem trocar a saída (adeus BlackHole, `SwitchAudioSource` e volume do Mac a 100%).
+- Armadilhas: as constantes `kAudioAggregateDevice*Key` vêm como `bytes` do PyObjC e derrubam o CoreAudio (converter para
+  `str`); tap privado exige agregado privado (senão 0 buffers); o agregado só expõe entradas ao PortAudio com tap e
+  agregado públicos; o identificador do IOProc não passa pelo PyObjC (usar ctypes).
+- Permissão: o macOS segura o áudio (0 chamadas) até o app ter "Gravação de áudio do sistema"; o estado inicial é
+  "indeterminado" e o pedido de permissão só tem API privada (`TCCAccessRequest`/`TCCAccessPreflight`, TCC.framework).
+  Depois de concedida, tudo flui. Exige `NSAudioCaptureUsageDescription` (já traduzida em pt/en/es/fr nesta branch).
+- Trabalho para integrar (não feito): backend de captura selecionável (BlackHole ou tap) no `Controller`/`stream.py`;
+  remover a troca de saída quando o tap estiver em uso; fluxo de permissão no menu (estado, pedido, orientação);
+  tap criado só enquanto há stream (como a captura de hoje, por conexão); limpeza do agregado ao sair ou cair (o tap
+  some com o processo, mas um agregado público não); testes com dublês; decidir o que fazer se a API privada de
+  permissão mudar (sem ela o usuário adiciona o app à mão em Ajustes).
+- Não verificado: o indicador exato que o macOS mostra durante a captura.
+
 ## Sprint 12: Localização da interface (en, es, fr; pt-BR é a base) — FEITO
 Hoje todos os textos da UI estão em português, espalhados em `ui/menubar.py` e `ui/model.py`.
 - Centralizar as strings: um catálogo por idioma (`mac_sonos/ui/locales/{pt,en,es,fr}.json` ou `gettext`) e uma
