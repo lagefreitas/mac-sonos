@@ -2,6 +2,7 @@
 import re
 
 from ..controller import CONNECTING, ERROR, STOPPED, STREAMING
+from ..i18n import t
 
 INTERRUPTED = "interrupted"  # we think we stream, but Sonos stopped or left our stream
 TITLES = {STOPPED: "🔈", CONNECTING: "🔄", STREAMING: "🔊", ERROR: "⚠️", INTERRUPTED: "⏸"}
@@ -12,18 +13,22 @@ RETRY_SECONDS = 10  # like the login loop: Wi-Fi, Sonos or BlackHole may not be 
 
 def status_text(state, interrupted=False):
     if interrupted:
-        return "Interrompido no Sonos"
+        return t("status.interrupted")
     if state.status == STREAMING:
-        return "Tocando em " + ", ".join(state.rooms)
+        return t("status.streaming", rooms=", ".join(state.rooms))
     if state.status == CONNECTING:
-        return "Conectando…"
+        return t("status.connecting")
     if state.status == ERROR:
-        return "Erro: " + (state.error or "desconhecido")
-    return "Parado"
+        if state.error_key:  # localizable error: translate it, keep the English text as the fallback
+            detail = t(state.error_key, **(state.error_vars or {}))
+            if detail != state.error_key:
+                return t("status.error", error=detail)
+        return t("status.error", error=state.error or t("status.error_unknown"))
+    return t("status.stopped")
 
 
 def toggle_label(status, interrupted=False):
-    return "Desligar" if status in (CONNECTING, STREAMING) and not interrupted else "Ligar"
+    return t("toggle.off") if status in (CONNECTING, STREAMING) and not interrupted else t("toggle.on")
 
 
 def toggle_room(selected, name):
@@ -40,7 +45,7 @@ def room_choices(discovered, selected):
 
 def volume_warning(mac_volume):
     if mac_volume is not None and mac_volume != 100:
-        return f"⚠️ Volume do Mac em {mac_volume}% (deixe em 100%)"
+        return t("warning.mac_volume", pct=mac_volume)
     return None
 
 
@@ -75,9 +80,9 @@ def track_text(info):
         return f"{info.title} – {info.artist}"
     if not info.title and not info.channel:
         if info.uri.startswith("x-sonos-htastream:"):
-            return "TV"
+            return t("track.tv")
         if info.uri.startswith("x-rincon-stream:"):
-            return "Line-in"
+            return t("track.line_in")
     return info.title or info.channel or "—"
 
 
@@ -103,16 +108,16 @@ def controls(info):
     """(key, label) of the transport controls this group supports right now."""
     a, out = info.actions, []
     if "previous" in a:
-        out.append(("previous", "⏮ Anterior"))
+        out.append(("previous", t("transport.previous")))
     if info.state == PLAYING and "pause" in a:
-        out.append(("pause", "⏸ Pausar"))
+        out.append(("pause", t("transport.pause")))
     elif info.state != PLAYING and "play" in a:
-        out.append(("play", "▶ Tocar"))
+        out.append(("play", t("transport.play")))
     if "next" in a:
-        out.append(("next", "⏭ Próxima"))
+        out.append(("next", t("transport.next")))
     if "seektime" in a and info.duration:
-        out.append(("back", f"⏪ −{BACK_SECONDS}s"))
-        out.append(("forward", f"⏩ +{FORWARD_SECONDS}s"))
+        out.append(("back", t("transport.back", n=BACK_SECONDS)))
+        out.append(("forward", t("transport.forward", n=FORWARD_SECONDS)))
     return out
 
 
@@ -159,7 +164,7 @@ VOLUME_DELTA = 5
 def level_text(volume, muted):
     if volume is None:
         return "?"
-    return "🔇 mudo" if muted else f"{volume}%"
+    return t("level.muted") if muted else f"{volume}%"
 
 
 def house_rooms(groups):
@@ -208,21 +213,27 @@ def sound_items(settings):
         return []
     items = []
     if settings.bass is not None:
-        items += [(f"Graves: {eq_text(settings.bass)}", None, None, None),
-                  (f"Graves +{EQ_STEP}", "bass_by", EQ_STEP, None),
-                  (f"Graves −{EQ_STEP}", "bass_by", -EQ_STEP, None)]
+        items += [(t("sound.bass", value=eq_text(settings.bass)), None, None, None),
+                  (t("sound.bass_up", n=EQ_STEP), "bass_by", EQ_STEP, None),
+                  (t("sound.bass_down", n=EQ_STEP), "bass_by", -EQ_STEP, None)]
     if settings.treble is not None:
-        items += [(f"Agudos: {eq_text(settings.treble)}", None, None, None),
-                  (f"Agudos +{EQ_STEP}", "treble_by", EQ_STEP, None),
-                  (f"Agudos −{EQ_STEP}", "treble_by", -EQ_STEP, None)]
+        items += [(t("sound.treble", value=eq_text(settings.treble)), None, None, None),
+                  (t("sound.treble_up", n=EQ_STEP), "treble_by", EQ_STEP, None),
+                  (t("sound.treble_down", n=EQ_STEP), "treble_by", -EQ_STEP, None)]
     if settings.loudness is not None:
-        items.append(("Loudness", "loudness", None, bool(settings.loudness)))
+        items.append((t("sound.loudness"), "loudness", None, bool(settings.loudness)))
     if settings.night_mode is not None:
-        items.append(("Modo noite", "night_mode", None, bool(settings.night_mode)))
+        items.append((t("sound.night_mode"), "night_mode", None, bool(settings.night_mode)))
     if settings.dialog_mode is not None:
-        items.append(("Realce de diálogo", "dialog_mode", None, bool(settings.dialog_mode)))
+        items.append((t("sound.dialog_mode"), "dialog_mode", None, bool(settings.dialog_mode)))
     if settings.surround is not None:
-        items.append(("Surround", "surround", None, bool(settings.surround)))
+        items.append((t("sound.surround"), "surround", None, bool(settings.surround)))
     if settings.soundbar:
-        items.append(("Áudio da TV", "tv", None, None))
+        items.append((t("sound.tv"), "tv", None, None))
     return items
+
+
+# --- language ------------------------------------------------------------------------------------
+def language_choices(available):
+    """Language codes to offer in the menu, or [] when there is nothing to choose from."""
+    return list(available) if len(available) > 1 else []

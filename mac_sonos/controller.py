@@ -25,6 +25,8 @@ class State:
     url: str = None
     error: str = None
     started_at: float = 0.0  # when the stream began (time.time())
+    error_key: str = None    # catalog key and variables of the error, when it has them (see i18n)
+    error_vars: dict = None
 
 
 class Controller:
@@ -88,11 +90,12 @@ class Controller:
             except Exception as e:  # keep the worker alive whatever a command does
                 log.exception("%s failed", name)
                 self._teardown()
-                self._set(status=ERROR, error=str(e))
+                self._set(status=ERROR, error=str(e), error_key=getattr(e, "key", None),
+                          error_vars=getattr(e, "vars", None))
 
     def _do_start(self, rooms, device, fmt, port, bitrate, lowlat, volume):
         self._do_stop()
-        self._set(status=CONNECTING, rooms=list(rooms), url=None, error=None)
+        self._set(status=CONNECTING, rooms=list(rooms), url=None, error=None, error_key=None, error_vars=None)
         output.require_device(device)
         speakers = discovery.find_rooms(rooms)
         self._stack = contextlib.ExitStack()

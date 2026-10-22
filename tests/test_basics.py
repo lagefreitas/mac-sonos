@@ -4,10 +4,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from mac_sonos import i18n
 from mac_sonos import config, controller
 from mac_sonos.core import output
 from mac_sonos.core.formats import FORMATS, ffmpeg_cmd
 from mac_sonos.ui import loginitem, model
+
+
+i18n.set_language("pt")  # the expected texts below are the Portuguese ones
 
 
 class FfmpegCmd(unittest.TestCase):
@@ -200,7 +204,8 @@ class ControllerStates(unittest.TestCase):
         controller.output.require_device.side_effect = controller.output.DeviceNotFound("no device")
         self.ctl.start(["Office"])
         st = self.ctl.wait_for(controller.ERROR, timeout=5)
-        self.assertEqual(st.error, "no device")
+        self.assertIn("'no device' not found", st.error)
+        self.assertEqual((st.error_key, st.error_vars), ("error.device_not_found", {"device": "no device"}))
         controller.output.require_device.side_effect = None
         self.ctl.start(["Office"])
         self.assertEqual(self.ctl.wait_for(controller.STREAMING, timeout=5).status, controller.STREAMING)

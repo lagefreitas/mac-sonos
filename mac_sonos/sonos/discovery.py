@@ -3,7 +3,13 @@ import soco
 
 
 class RoomNotFound(Exception):
-    pass
+    """English text for the CLI; `key` and `vars` let the UI show it in the user's language."""
+    key = "error.room_not_found"
+
+    def __init__(self, room, available):
+        shown = ", ".join(sorted(available)) or "none"
+        super().__init__(f"Room '{room}' not found. Available: {shown}")
+        self.vars = {"room": room, "available": shown}
 
 
 def discover(timeout=5):
@@ -15,6 +21,6 @@ def find_rooms(names):
     found = []
     for n in names:
         if n.lower() not in by_name:
-            raise RoomNotFound(f"Room '{n}' not found. Available: {', '.join(sorted(by_name)) or 'none'}")
+            raise RoomNotFound(n, by_name)
         found.append(by_name[n.lower()])
     return found

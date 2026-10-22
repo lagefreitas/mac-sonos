@@ -93,7 +93,7 @@ laranja de microfone enquanto há stream. Um process tap captura o áudio do sis
 - Alternativa descartada por ora: ScreenCaptureKit (áudio apenas), que exige Gravação de Tela.
 - Se o protótipo falhar, manter o BlackHole e documentar o indicador como inevitável.
 
-## Sprint 12: Localização da interface (en, es, fr; pt-BR é a base)
+## Sprint 12: Localização da interface (en, es, fr; pt-BR é a base) — INFRAESTRUTURA FEITA
 Hoje todos os textos da UI estão em português, espalhados em `ui/menubar.py` e `ui/model.py`.
 - Centralizar as strings: um catálogo por idioma (`mac_sonos/ui/locales/{pt,en,es,fr}.json` ou `gettext`) e uma
   função `t("chave", **vars)`; nada de texto de UI fora dele. Plurais e variáveis (`{rooms}`, `{pct}`) tratados no
@@ -104,6 +104,9 @@ Hoje todos os textos da UI estão em português, espalhados em `ui/menubar.py` e
   descrições de permissão do `Info.plist` (`InfoPlist.strings` por idioma: Microfone e Rede Local) e README.
 - Testes: todo idioma tem exatamente as mesmas chaves e as mesmas variáveis do pt (teste automático); nenhuma
   string de UI fora do catálogo (teste que varre `ui/`).
+- Feito: `i18n.py` (`t`, `tn`, fallback en→pt, detecção do idioma do sistema), `locales/pt.json` com todos os textos da
+  UI, erros localizáveis, menu "Idioma" (escondido enquanto só houver pt), testes de paridade/uso/sem texto no código.
+  Falta: traduzir en/es/fr, `InfoPlist.strings` por idioma, README por idioma e revisar larguras do menu.
 - Recomendação: antecipar a infraestrutura (catálogo + `t()`) antes de crescer mais a UI, com o pt como único idioma;
   traduzir en/es/fr no fim. Cada sprint seguinte já nasce usando `t()`.
 - Risco: o menu muda de largura com o idioma (es/fr são mais longos); revisar textos de barra e abreviações.

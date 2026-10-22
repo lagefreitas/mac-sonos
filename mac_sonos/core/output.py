@@ -10,7 +10,14 @@ REMEMBERED = Path.home() / "Library" / "Application Support" / "mac-sonos" / "pr
 
 
 class DeviceNotFound(Exception):
-    pass
+    """English text for the CLI; `key` and `vars` let the UI show it in the user's language."""
+    key = "error.device_not_found"
+
+    def __init__(self, device):
+        super().__init__(
+            f"Audio device '{device}' not found. If BlackHole is installed, load it with "
+            "`sudo killall coreaudiod` (or reboot); otherwise see `python -m mac_sonos devices`.")
+        self.vars = {"device": device}
 
 
 def input_devices():
@@ -23,9 +30,7 @@ def device_exists(name):
 
 def require_device(name):
     if not device_exists(name):
-        raise DeviceNotFound(
-            f"Audio device '{name}' not found. If BlackHole is installed, load it with "
-            "`sudo killall coreaudiod` (or reboot); otherwise see `python -m mac_sonos devices`.")
+        raise DeviceNotFound(name)
 
 
 def mac_volume():

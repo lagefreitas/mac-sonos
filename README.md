@@ -68,6 +68,16 @@ Measures the time from Sonos connecting to reporting PLAYING for each format. Re
 
 Settings live in `~/Library/Application Support/mac-sonos/config.json` (rooms, volume, format, device, port).
 
+## Interface language
+
+All UI text lives in `mac_sonos/locales/<code>.json` and is read with `t("key", name=value)` (`mac_sonos/i18n.py`);
+nothing in the UI modules may contain text of its own. Portuguese (`pt`) is the base. To add a language:
+copy `pt.json` to `<code>.json`, translate the values (keep the keys and every `{placeholder}`), and set
+`meta.language_name` to the language's own name. `python -m unittest discover tests` checks that the new file has the
+same keys and placeholders as `pt.json` and that no UI text is hard-coded. With two or more catalogs the menu gets an
+"Idioma" submenu (Automático follows the system language; the choice is saved as `language` in the config).
+Lookup falls back to English, then Portuguese; a missing key shows the key and is logged once.
+
 ## Notes
 
 - Latency is 3-10 s (Sonos buffers radio streams). Fine for music, not for video or calls.

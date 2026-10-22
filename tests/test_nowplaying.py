@@ -3,9 +3,13 @@ import queue
 import unittest
 from unittest import mock
 
+from mac_sonos import i18n
 from mac_sonos.sonos import monitor as mon
 from mac_sonos.sonos.monitor import GroupInfo, Monitor, PAUSED, PLAYING, RoomSettings, STOPPED
 from mac_sonos.ui import model
+
+
+i18n.set_language("pt")  # the expected texts below are the Portuguese ones
 
 
 class Parsing(unittest.TestCase):

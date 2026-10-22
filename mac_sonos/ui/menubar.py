@@ -6,9 +6,10 @@ import time
 
 import rumps
 
-from .. import config
+from .. import config, i18n
 from ..controller import CONNECTING, STREAMING, Controller
 from ..core import output
+from ..i18n import t
 from ..sonos import art, discovery
 from ..sonos.monitor import Monitor
 from . import loginitem, model
@@ -36,30 +37,34 @@ class MenuBarApp(rumps.App):
         self.interrupted = False
         self._house_key = None
         self._house_items = {}  # room -> (menu item, volume label)
+        self._static = []       # (menu item, catalog key): retitled when the language changes
+        i18n.set_language(self.cfg["language"])
 
-        self.status_item = rumps.MenuItem("Parado")
+        self.status_item = rumps.MenuItem(t("status.stopped"))
         self.warning_item = rumps.MenuItem("")
         self.warning_item._menuitem.setHidden_(True)
-        self.toggle_item = rumps.MenuItem("Ligar", callback=self.on_toggle)
+        self.toggle_item = rumps.MenuItem(t("toggle.on"), callback=self.on_toggle)
         self.track_item = rumps.MenuItem("")
         self.track_item._menuitem.setHidden_(True)
-        self.now_menu = rumps.MenuItem("Agora tocando")
-        self.bar_item = rumps.MenuItem("Faixa na barra", callback=self.on_track_in_bar)
-        self.house_menu = rumps.MenuItem("Casa")
-        self.rooms_menu = rumps.MenuItem("Cômodos do Mac")
-        self.volume_menu = rumps.MenuItem("Volume")
+        self.now_menu = self._static_item("menu.now_playing")
+        self.bar_item = self._static_item("menu.track_in_bar", self.on_track_in_bar)
+        self.house_menu = self._static_item("menu.house")
+        self.rooms_menu = self._static_item("menu.rooms")
+        self.volume_menu = self._static_item("menu.volume")
         for v in model.VOLUME_STEPS:
             self.volume_menu.add(rumps.MenuItem(f"{v}%", callback=self.on_volume))
-        self.format_menu = rumps.MenuItem("Formato")
+        self.format_menu = self._static_item("menu.format")
         for f in model.FORMAT_CHOICES:
             self.format_menu.add(rumps.MenuItem(f, callback=self.on_format))
-        self.autostart_item = rumps.MenuItem("Ligar ao abrir", callback=self.on_autostart)
-        self.login_item = rumps.MenuItem("Abrir no login", callback=self.on_login_item)
+        self.autostart_item = self._static_item("menu.autostart", self.on_autostart)
+        self.login_item = self._static_item("menu.login", self.on_login_item)
+        self.language_menu = self._static_item("menu.language")
+        self._rebuild_languages()
         self.menu = [
             self.status_item, self.warning_item, self.toggle_item, self.track_item, None,
             self.now_menu, self.house_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
-            self.autostart_item, self.bar_item, self.login_item, rumps.MenuItem("Atualizar cômodos", callback=self.on_refresh),
-            rumps.MenuItem("Sair", callback=self.on_quit),
+            self.autostart_item, self.bar_item, self.login_item, *([self.language_menu] if len(self.language_menu) else []),
+            self._static_item("menu.refresh", self.on_refresh), self._static_item("menu.quit", self.on_quit),
         ]
         self._refresh_checks()
         self._rebuild_rooms()
@@ -70,6 +75,35 @@ class MenuBarApp(rumps.App):
         signal.signal(signal.SIGTERM, lambda *_: self.on_quit(None))  # runs on the next timer tick
         self.timer = rumps.Timer(self._tick, 1)
         self.timer.start()
+
+    def _static_item(self, key, callback=None):
+        item = rumps.MenuItem(t(key), callback=callback)
+        self._static.append((item, key))
+        return item
+
+    # --- language -------------------------------------------------------------------------------
+
+    def _rebuild_languages(self):
+        """The language submenu is only worth showing when there is more than one language."""
+        codes = model.language_choices(i18n.available_languages())
+        if len(self.language_menu):
+            self.language_menu.clear()
+        if not codes:
+            return
+        for choice, label in [(i18n.AUTO, t("menu.language_auto"))] + [(c, i18n.language_name(c)) for c in codes]:
+            item = rumps.MenuItem(label, callback=lambda _, c=choice: self.on_language(c))
+            item.state = int(self.cfg["language"] == choice)
+            self.language_menu.add(item)
+
+    def on_language(self, choice):
+        self.cfg["language"] = choice
+        config.save(self.cfg)
+        i18n.set_language(choice)
+        for item, key in self._static:
+            item.title = t(key)
+        self._rebuild_languages()
+        self._rebuild_rooms()
+        self._now_key = self._house_key = None  # rebuilt by the next tick, in the new language
 
     # --- actions --------------------------------------------------------------------------------
 
@@ -126,12 +160,11 @@ class MenuBarApp(rumps.App):
     def on_login_item(self, _):
         current = loginitem.status()
         if current is None:
-            rumps.alert("Abrir no login", "Disponível só no Mac Sonos.app (veja build-app.sh).")
+            rumps.alert(t("login.title"), t("login.only_app"))
             return
         new = loginitem.set_enabled(current != loginitem.ENABLED)
         if new == loginitem.REQUIRES_APPROVAL:
-            rumps.alert("Abrir no login", "Aprove o Mac Sonos em Ajustes do Sistema > Geral > "
-                                          "Itens de Início de Sessão.")
+            rumps.alert(t("login.title"), t("login.approve"))
         self._refresh_checks()
 
     def on_refresh(self, _):
@@ -185,7 +218,7 @@ class MenuBarApp(rumps.App):
             self.now_menu.clear()
         self._time_items = {}
         if not active:
-            self.now_menu.add(rumps.MenuItem("Nada tocando"))
+            self.now_menu.add(rumps.MenuItem(t("now.nothing")))
             return
         for g in active:
             header = rumps.MenuItem(f"{model.STATE_ICONS[g.state]} {model.group_name(g)}")
@@ -221,37 +254,37 @@ class MenuBarApp(rumps.App):
         self._house_items = {}
         d = model.VOLUME_DELTA
         if not self.groups:
-            self.house_menu.add(rumps.MenuItem("Procurando…"))
+            self.house_menu.add(rumps.MenuItem(t("house.searching")))
             return
         for g in self.groups:
             if len(g.members) > 1:
-                row = rumps.MenuItem(f"Grupo: {model.group_name(g)}")
-                row.add(rumps.MenuItem(f"Volume +{d}", callback=lambda _, c=g.coordinator: self.monitor.command(c, "volume_by", d)))
-                row.add(rumps.MenuItem(f"Volume −{d}", callback=lambda _, c=g.coordinator: self.monitor.command(c, "volume_by", -d)))
+                row = rumps.MenuItem(t("house.group", name=model.group_name(g)))
+                row.add(rumps.MenuItem(t("house.volume_up", n=d), callback=lambda _, c=g.coordinator: self.monitor.command(c, "volume_by", d)))
+                row.add(rumps.MenuItem(t("house.volume_down", n=d), callback=lambda _, c=g.coordinator: self.monitor.command(c, "volume_by", -d)))
                 self.house_menu.add(row)
             for room, group, volume, muted in model.house_rooms([g]):
                 text = model.level_text(volume, muted)
                 item = rumps.MenuItem(f"{room}  ·  {text}")
-                label = rumps.MenuItem(f"Volume: {text}")
-                item.add(label)
-                item.add(rumps.MenuItem(f"Volume +{d}", callback=lambda _, r=room: self._room(r, "volume_by", d)))
-                item.add(rumps.MenuItem(f"Volume −{d}", callback=lambda _, r=room: self._room(r, "volume_by", -d)))
-                mute = rumps.MenuItem("Mudo", callback=lambda _, r=room: self._room(r, "mute"))
+                volume_label = rumps.MenuItem(t("house.volume_label", level=text))
+                item.add(volume_label)
+                item.add(rumps.MenuItem(t("house.volume_up", n=d), callback=lambda _, r=room: self._room(r, "volume_by", d)))
+                item.add(rumps.MenuItem(t("house.volume_down", n=d), callback=lambda _, r=room: self._room(r, "volume_by", -d)))
+                mute = rumps.MenuItem(t("house.mute"), callback=lambda _, r=room: self._room(r, "mute"))
                 mute.state = int(bool(muted))
                 item.add(mute)
                 item.add(None)
-                join = rumps.MenuItem("Juntar a")
+                join = rumps.MenuItem(t("house.join"))
                 targets = model.join_targets(self.groups, group)
-                for t in targets:
-                    join.add(rumps.MenuItem(t, callback=lambda _, r=room, t=t: self._room(r, "join", t)))
+                for target in targets:
+                    join.add(rumps.MenuItem(target, callback=lambda _, r=room, to=target: self._room(r, "join", to)))
                 if not targets:
                     join.add(rumps.MenuItem("—"))
                 item.add(join)
                 if len(group.members) > 1:
-                    item.add(rumps.MenuItem("Sair do grupo", callback=lambda _, r=room: self._room(r, "unjoin")))
-                sound = rumps.MenuItem("Som")
-                for label, action, arg, checked in model.sound_items(self.settings.get(room)):
-                    entry = rumps.MenuItem(label, callback=None if action is None else
+                    item.add(rumps.MenuItem(t("house.leave"), callback=lambda _, r=room: self._room(r, "unjoin")))
+                sound = rumps.MenuItem(t("sound.title"))
+                for sound_label, action, arg, checked in model.sound_items(self.settings.get(room)):
+                    entry = rumps.MenuItem(sound_label, callback=None if action is None else
                                            (lambda _, r=room, a=action, v=arg: self._room(r, a, v)))
                     if checked is not None:
                         entry.state = int(checked)
@@ -260,10 +293,10 @@ class MenuBarApp(rumps.App):
                     item.add(None)
                     item.add(sound)
                 self.house_menu.add(item)
-                self._house_items[room] = (item, label)
+                self._house_items[room] = (item, volume_label)
         self.house_menu.add(None)
-        self.house_menu.add(rumps.MenuItem("Juntar todos (modo festa)", callback=self._party))
-        self.house_menu.add(rumps.MenuItem("Separar todos", callback=lambda _: self._room(None, "ungroup_all")))
+        self.house_menu.add(rumps.MenuItem(t("house.party"), callback=self._party))
+        self.house_menu.add(rumps.MenuItem(t("house.split"), callback=lambda _: self._room(None, "ungroup_all")))
 
     def _update_house(self):
         key = model.house_key(self.groups, self.settings)
@@ -275,7 +308,7 @@ class MenuBarApp(rumps.App):
             if room in self._house_items:
                 item, label = self._house_items[room]
                 text = model.level_text(volume, muted)
-                item.title, label.title = f"{room}  ·  {text}", f"Volume: {text}"
+                item.title, label.title = f"{room}  ·  {text}", t("house.volume_label", level=text)
 
     def _update_now(self):
         groups = self.groups
@@ -296,6 +329,12 @@ class MenuBarApp(rumps.App):
         return primary
 
     def _tick(self, _):
+        try:
+            self._tick_once()
+        except Exception:  # rumps would only print this to a stderr nobody reads
+            log.exception("menu refresh failed")
+
+    def _tick_once(self):
         self.ticks += 1
         state = self.ctl.state
         if self.discovered is not None:
