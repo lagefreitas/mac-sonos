@@ -12,6 +12,8 @@ DEFAULTS = {
     "port": 8000,
     "autostart_stream": True,  # menu bar app: start streaming when it opens
     "track_in_bar": False,     # menu bar app: show the current track next to the icon
+    "play_target": None,       # room whose group favorites, playlists and URLs play on (None: the Mac's first room)
+    "radio_urls": [],          # saved stream URLs: [{"title": ..., "url": ...}]
     "language": "auto",        # "auto" follows the system; or a code such as "pt" (see mac_sonos/locales)
 }
 

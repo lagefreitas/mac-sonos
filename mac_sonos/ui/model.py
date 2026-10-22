@@ -237,3 +237,64 @@ def sound_items(settings):
 def language_choices(available):
     """Language codes to offer in the menu, or [] when there is nothing to choose from."""
     return list(available) if len(available) > 1 else []
+
+
+# --- library: favorites, playlists, queue, radio URLs --------------------------------------------
+from ..sonos.library import PLAYLIST, RADIO, TRACK, default_title  # noqa: E402
+
+KIND_ORDER = (RADIO, TRACK, PLAYLIST)
+KIND_KEYS = {RADIO: "library.radios", TRACK: "library.tracks", PLAYLIST: "library.playlists"}
+QUEUE_WINDOW = 40
+
+
+def play_target(groups, rooms, target_room=None):
+    """The group library items play on: the one holding `target_room`, else the Mac's first room, else the
+    first group."""
+    for room in (target_room, rooms[0] if rooms else None):
+        found = next((g for g in groups if room and room in g.members), None)
+        if found:
+            return found
+    return groups[0] if groups else None
+
+
+def target_room_name(groups, rooms, chosen=None):
+    """The room shown as the target: the chosen one if it exists, else the Mac's first room, else the first
+    room of the first group, else ''."""
+    existing = {m for g in groups for m in g.members}
+    for room in (chosen, rooms[0] if rooms else None):
+        if room in existing:
+            return room
+    return groups[0].members[0] if groups else ""
+
+
+def favorite_sections(favorites):
+    """(title, favorites) per kind that has any, in a fixed order."""
+    out = []
+    for kind in KIND_ORDER:
+        items = [f for f in favorites if f.kind == kind]
+        if items:
+            out.append((t("library.group", kind=t(KIND_KEYS[kind]), n=len(items)), items))
+    return out
+
+
+def queue_window(entries, current_index, size=QUEUE_WINDOW):
+    """(shown entries, hidden before, hidden after): a window of `size` entries around the current one."""
+    if len(entries) <= size:
+        return list(entries), 0, 0
+    start = max(0, min((current_index if current_index >= 0 else 0) - size // 8, len(entries) - size))
+    return list(entries[start:start + size]), start, len(entries) - start - size
+
+
+def queue_entry_text(entry, current):
+    text = f"{entry.index + 1}. {shorten(f'{entry.title} – {entry.artist}' if entry.artist else entry.title, 44)}"
+    return f"▶ {text}" if current else text
+
+
+def add_radio(saved, title, url):
+    """Saved stations with `url` added (or its title updated); the list is not modified in place."""
+    url, title = url.strip(), title.strip() or default_title(url)
+    return [r for r in saved if r["url"] != url] + [{"title": title, "url": url}]
+
+
+def remove_radio(saved, url):
+    return [r for r in saved if r["url"] != url]

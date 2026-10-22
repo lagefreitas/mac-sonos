@@ -63,9 +63,13 @@ Vem cedo porque a permissão de Rede Local define se o resto funciona.
 - Feito: EQ, modo noite, realce de diálogo, surround e TV nas soundbars. Line-in ficou de fora (a API não revela quais
   aparelhos têm entrada; nenhum dos seus tem). O botão TV foi coberto por teste unitário, não executado no aparelho real.
 
-## Sprint 6: Favoritos, playlists, rádio, fila
+## Sprint 6: Favoritos, playlists, rádio, fila (FEITO)
 - `get_sonos_favorites` e `get_sonos_playlists` com tocar em um clique; fila atual; rádio por URL.
 - **Risco:** favoritos de serviços exigem DIDL correto; alguns só tocam via nuvem. Testar favorito por favorito.
+- Feito: 22 dos 26 favoritos da casa são tocáveis localmente (18 rádios, 3 faixas, 1 playlist); os 4 sem URI (hub do
+  Sonos Radio, artista) ficam de fora. Testado nos aparelhos, com o cômodo mudo: rádio, faixa, playlist do Spotify,
+  playlist do Sonos, URL, e play/remover/limpar na fila. Limites: fila lida até 100 faixas; URLs de playlist (.m3u/.pls)
+  não são suportadas; "Descubra o Sonos Radio" e artistas só pela nuvem (sprint 10).
 
 ## Sprint 7: Sleep timer e alarmes
 - Sleep timer por grupo (`get_sleep_timer`/`set_sleep_timer`); alarmes via `soco.alarms`.

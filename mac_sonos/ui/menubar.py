@@ -11,6 +11,7 @@ from ..controller import CONNECTING, STREAMING, Controller
 from ..core import output
 from ..i18n import t
 from ..sonos import art, discovery
+from ..sonos.library import Library, default_title as library_default_title, valid_stream_url
 from ..sonos.monitor import Monitor
 from . import loginitem, model
 
@@ -30,6 +31,9 @@ class MenuBarApp(rumps.App):
         self.groups = []        # latest from the monitor thread (a plain reference swap)
         self.settings = {}      # room -> RoomSettings, same
         self.monitor = Monitor(on_change=self._on_groups)
+        self.library = Library(self.monitor.zone_for_group, self.monitor.any_zone,
+                               refresh_group=lambda group: self.monitor.command(group, "refresh"))
+        self._library_key = None
         self._now_key = None
         self._time_items = {}   # coordinator -> menu item showing the position
         self._art_pending = set()
@@ -58,11 +62,12 @@ class MenuBarApp(rumps.App):
             self.format_menu.add(rumps.MenuItem(f, callback=self.on_format))
         self.autostart_item = self._static_item("menu.autostart", self.on_autostart)
         self.login_item = self._static_item("menu.login", self.on_login_item)
+        self.library_menu = self._static_item("menu.library")
         self.language_menu = self._static_item("menu.language")
         self._rebuild_languages()
         self.menu = [
             self.status_item, self.warning_item, self.toggle_item, self.track_item, None,
-            self.now_menu, self.house_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
+            self.now_menu, self.house_menu, self.library_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
             self.autostart_item, self.bar_item, self.login_item, *([self.language_menu] if len(self.language_menu) else []),
             self._static_item("menu.refresh", self.on_refresh), self._static_item("menu.quit", self.on_quit),
         ]
@@ -70,8 +75,10 @@ class MenuBarApp(rumps.App):
         self._rebuild_rooms()
         self._rebuild_now([])
         self._rebuild_house()
+        self._rebuild_library()
         self.on_refresh(None)
         self.monitor.start()
+        self.library.start()
         signal.signal(signal.SIGTERM, lambda *_: self.on_quit(None))  # runs on the next timer tick
         self.timer = rumps.Timer(self._tick, 1)
         self.timer.start()
@@ -103,7 +110,7 @@ class MenuBarApp(rumps.App):
             item.title = t(key)
         self._rebuild_languages()
         self._rebuild_rooms()
-        self._now_key = self._house_key = None  # rebuilt by the next tick, in the new language
+        self._now_key = self._house_key = self._library_key = None  # rebuilt by the next tick, new language
 
     # --- actions --------------------------------------------------------------------------------
 
@@ -177,6 +184,7 @@ class MenuBarApp(rumps.App):
 
     def on_quit(self, _):
         self.timer.stop()
+        self.library.stop()
         self.monitor.stop()
         self.ctl.shutdown()  # stops the stream and restores the Mac output
         rumps.quit_application()
@@ -310,6 +318,140 @@ class MenuBarApp(rumps.App):
                 text = model.level_text(volume, muted)
                 item.title, label.title = f"{room}  ·  {text}", t("house.volume_label", level=text)
 
+    # --- library: favorites, playlists, queue, radio URLs ---------------------------------------
+
+    def _target(self):
+        return model.play_target(self.groups, self.cfg["rooms"], self.cfg["play_target"])
+
+    def _on_target(self, room):
+        self.cfg["play_target"] = room
+        self._save()
+        self._library_key = None
+
+    def _play(self, action, *args):
+        """Run a Library action on the target group; nothing happens if there is no group yet."""
+        target = self._target()
+        if target:
+            getattr(self.library, action)(target.coordinator, *args)
+
+    def _ask(self, message, default=""):
+        """A one-line prompt; the text, or None if cancelled."""
+        window = rumps.Window(message=message, title=t("menu.radios"), default_text=default,
+                              ok=t("dialog.ok"), cancel=t("dialog.cancel"), dimensions=(380, 24))
+        response = window.run()
+        return response.text.strip() if response.clicked else None
+
+    def _ask_url(self):
+        url = self._ask(t("radio.url_prompt"), "https://")
+        if url is None:
+            return None
+        if not valid_stream_url(url):
+            rumps.alert(t("menu.radios"), t("radio.invalid_url"))
+            return None
+        return url
+
+    def on_play_url(self, _):
+        url = self._ask_url()
+        if url:
+            self._play("play_url", url)
+
+    def on_add_radio(self, _):
+        url = self._ask_url()
+        if url:
+            title = self._ask(t("radio.name_prompt"), library_default_title(url))
+            if title is not None:
+                self.cfg["radio_urls"] = model.add_radio(self.cfg["radio_urls"], title, url)
+                self._save()
+                self._library_key = None
+
+    def on_remove_radio(self, url):
+        self.cfg["radio_urls"] = model.remove_radio(self.cfg["radio_urls"], url)
+        self._save()
+        self._library_key = None
+
+    def _library_state(self):
+        target = self._target()
+        room = model.target_room_name(self.groups, self.cfg["rooms"], self.cfg["play_target"])
+        queue = self.library.queues.get(target.coordinator, ()) if target else ()
+        position = target.queue_position if target else 0
+        return target, room, queue, position
+
+    def _rebuild_library(self):
+        target, room, entries, position = self._library_state()
+        menu = self.library_menu
+        if len(menu):
+            menu.clear()
+        # where things play
+        where = rumps.MenuItem(t("library.play_on", room=room))
+        for name in sorted({m for g in self.groups for m in g.members}):
+            item = rumps.MenuItem(name, callback=lambda _, r=name: self._on_target(r))
+            item.state = int(name == room)
+            where.add(item)
+        if not len(where):
+            where.add(rumps.MenuItem(t("library.loading")))
+        menu.add(where)
+        menu.add(None)
+        # favorites, by kind
+        favorites = rumps.MenuItem(t("menu.favorites"))
+        for title, items in model.favorite_sections(self.library.favorites):
+            section = rumps.MenuItem(title)
+            for fav in items:
+                section.add(rumps.MenuItem(model.shorten(fav.title, 44), callback=lambda _, f=fav: self._play("play_favorite", f)))
+            favorites.add(section)
+        if not len(favorites):
+            favorites.add(rumps.MenuItem(t("library.empty")))
+        menu.add(favorites)
+        playlists = rumps.MenuItem(t("menu.playlists"))
+        for playlist in self.library.playlists:
+            playlists.add(rumps.MenuItem(model.shorten(playlist.title, 44), callback=lambda _, p=playlist: self._play("play_playlist", p)))
+        if not len(playlists):
+            playlists.add(rumps.MenuItem(t("library.empty")))
+        menu.add(playlists)
+        # queue of the target group
+        queue = rumps.MenuItem(t("menu.queue"))
+        shown, before, after = model.queue_window(entries, position - 1)
+        if before:
+            queue.add(rumps.MenuItem(t("queue.before", n=before)))
+        for entry in shown:
+            row = rumps.MenuItem(model.queue_entry_text(entry, entry.index + 1 == position))
+            row.add(rumps.MenuItem(t("queue.play"), callback=lambda _, i=entry.index: self._play("play_queue_index", i)))
+            row.add(rumps.MenuItem(t("queue.remove"), callback=lambda _, i=entry.index: self._play("remove_from_queue", i)))
+            queue.add(row)
+        if after:
+            queue.add(rumps.MenuItem(t("queue.after", n=after)))
+        if entries:
+            queue.add(None)
+            queue.add(rumps.MenuItem(t("queue.clear"), callback=lambda _: self._play("clear_queue")))
+        else:
+            queue.add(rumps.MenuItem(t("queue.empty")))
+        menu.add(queue)
+        menu.add(None)
+        # radio URLs
+        radios = rumps.MenuItem(t("menu.radios"))
+        for station in self.cfg["radio_urls"]:
+            radios.add(rumps.MenuItem(model.shorten(station["title"], 44),
+                                      callback=lambda _, s=station: self._play("play_url", s["url"], s["title"])))
+        if len(radios):
+            radios.add(None)
+        radios.add(rumps.MenuItem(t("radio.play_url"), callback=self.on_play_url))
+        radios.add(rumps.MenuItem(t("radio.add"), callback=self.on_add_radio))
+        if self.cfg["radio_urls"]:
+            remove = rumps.MenuItem(t("radio.remove"))
+            for station in self.cfg["radio_urls"]:
+                remove.add(rumps.MenuItem(model.shorten(station["title"], 44), callback=lambda _, u=station["url"]: self.on_remove_radio(u)))
+            radios.add(remove)
+        menu.add(radios)
+
+    def _update_library(self):
+        target, room, entries, position = self._library_state()
+        if target:
+            self.library.watch(target.coordinator)
+        key = (self.library.version, room, position, target.coordinator if target else None,
+               tuple(sorted({m for g in self.groups for m in g.members})), repr(self.cfg["radio_urls"]))
+        if key != self._library_key:
+            self._library_key = key
+            self._rebuild_library()
+
     def _update_now(self):
         groups = self.groups
         active = [g for g in groups if model.is_active(g)]
@@ -350,6 +492,7 @@ class MenuBarApp(rumps.App):
             self.interrupted = interrupted
         primary = self._update_now()
         self._update_house()
+        self._update_library()
         icon = model.TITLES[model.INTERRUPTED if interrupted else state.status]
         self.title = model.bar_title(icon, primary) if self.cfg["track_in_bar"] else icon
         self.status_item.title = model.status_text(state, interrupted)

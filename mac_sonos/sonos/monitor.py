@@ -61,6 +61,7 @@ class GroupInfo:
     duration: int = 0       # seconds, 0 for streams
     actions: frozenset = frozenset()
     levels: tuple = ()      # (room, volume, muted) per member; volume is None if unreadable
+    queue_position: int = 0  # 1-based position of the current track in the queue (0: unknown)
     # volatile: they change every second and must not count as a change
     position: int = field(default=0, compare=False)
     read_at: float = field(default=0.0, compare=False)
@@ -99,6 +100,7 @@ def read_group(coordinator, members, now=None, zones=()):
         title=track.get("title", ""), artist=track.get("artist", ""), album=track.get("album", ""),
         art_url=track.get("album_art", ""), uri=track.get("uri", ""), channel=channel,
         duration=parse_hms(track.get("duration")), actions=actions, levels=read_levels(zones),
+        queue_position=int(track.get("playlist_position") or 0) if str(track.get("playlist_position") or "0").isdigit() else 0,
         position=parse_hms(track.get("position")), read_at=now or time.time())
 
 
@@ -171,6 +173,16 @@ class Monitor:
         """Latest RoomSettings per room name."""
         with self._lock:
             return dict(self._settings)
+
+    def zone_for_group(self, coordinator):
+        """The SoCo of a group's coordinator, or None (safe to call from any thread)."""
+        with self._lock:
+            group = self._groups.get(coordinator)
+            return group.coordinator if group else None
+
+    def any_zone(self):
+        with self._lock:
+            return next((g.coordinator for g in self._groups.values()), None)
 
     def start(self):
         self._thread = threading.Thread(target=self._loop, daemon=True, name="monitor")
@@ -389,6 +401,8 @@ class Monitor:
                 z.volume = clamp_volume(z.volume + arg)
         elif action == "partymode":
             zone.partymode()
+        elif action == "refresh":
+            pass  # nothing to send: the caller changed the group by other means and wants it re-read
         elif action in ("play", "pause", "next", "previous", "stop"):
             getattr(zone, action)()
         else:

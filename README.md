@@ -32,6 +32,14 @@ their visible player. Changes made elsewhere (the Sonos app, physical buttons) s
 soundbars night mode, speech enhancement ("Realce de diálogo"), surround and "Áudio da TV" (switches the soundbar to
 its TV input; if it was in a group, it leaves it). Line-in is not offered: the API cannot tell which players have one.
 
+**Biblioteca:** "Tocar em: <cômodo>" chooses the group everything below plays on (the Mac's first room by default).
+"Favoritos" lists your Sonos favorites by kind (radio stations, tracks, playlists; items the local API cannot play,
+such as service hubs or artists without a URI, are left out). "Playlists do Sonos" plays a Sonos playlist, "Fila" shows
+the group's queue (a window of 40 around the current track) with play and remove per track and "Limpar fila".
+"Rádios por URL" plays any http(s) MP3/AAC stream and keeps a saved list. Playing a track or playlist replaces
+the queue, like "play now" in the Sonos app; radios start from the Sonos side and can take several seconds.
+Playing on a room that carries the Mac's stream replaces it (the icon turns ⏸; "Ligar" brings it back).
+
 **Interrompido:** if someone stops the Mac stream outside this app, the icon turns ⏸, the status says
 "Interrompido no Sonos", and the main button becomes "Ligar" to start it again (nothing restarts by itself).
 
