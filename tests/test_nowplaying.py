@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from mac_sonos.sonos import monitor as mon
-from mac_sonos.sonos.monitor import GroupInfo, Monitor, PAUSED, PLAYING, STOPPED
+from mac_sonos.sonos.monitor import GroupInfo, Monitor, PAUSED, PLAYING, RoomSettings, STOPPED
 from mac_sonos.ui import model
 
 
@@ -98,6 +98,7 @@ class FakeZone:
         self.state, self.title, self.position, self.duration = PLAYING, "Song", "0:00:10", "0:03:20"
         self.available_actions = ["Play", "Pause", "Next", "SeekTime"]
         self.volume, self.mute, self.is_visible = 20, False, True
+        self.bass, self.treble, self.loudness = 0, 0, True
         self.calls, self.groups_ref = [], groups_ref
         self.avTransport = mock.Mock()
         self.avTransport.subscribe.return_value = mock.Mock(events=queue.Queue())
@@ -121,7 +122,7 @@ class FakeZone:
         return self.groups_ref()
 
     def __getattr__(self, name):
-        if name in ("play", "pause", "next", "previous", "stop", "seek", "join", "unjoin", "partymode"):
+        if name in ("play", "pause", "next", "previous", "stop", "seek", "join", "unjoin", "partymode", "switch_to_tv"):
             return lambda *a: self.calls.append((name, *a))
         raise AttributeError(name)
 
@@ -287,6 +288,98 @@ class HouseTests(MonitorTests):
         self.m.room_command("Office", "volume", 33)
         self.run_cmds()
         self.assertEqual(self.office.volume, 33)
+
+
+class SoundTests(MonitorTests):
+    def setUp(self):
+        super().setUp()
+        self.tv.is_soundbar, self.tv.night_mode, self.tv.dialog_mode, self.tv.surround_enabled = True, False, False, True
+        self.m._step(100.0)
+
+    def step(self, now=100.5):
+        self.m._step(now)
+
+    def test_settings_are_read_and_capabilities_differ_by_room(self):
+        st = self.m.settings
+        self.assertEqual(st["Office"], RoomSettings(bass=0, treble=0, loudness=True))
+        self.assertEqual(st["TV Room"], RoomSettings(0, 0, True, False, False, True, True))
+        self.assertIsNone(st["Office"].night_mode)  # a Play:1 has no night mode
+
+    def test_eq_commands_are_relative_and_clamped(self):
+        self.m.room_command("Office", "bass_by", 1)
+        self.m.room_command("Office", "treble_by", -1)
+        for _ in range(15):
+            self.m.room_command("TV Room", "bass_by", 1)
+        self.step()
+        self.assertEqual((self.office.bass, self.office.treble, self.tv.bass), (1, -1, 10))
+        self.assertEqual(self.m.settings["Office"].bass, 1)  # re-read right after the command
+
+    def test_toggles(self):
+        for action in ("loudness", "night_mode", "dialog_mode", "surround"):
+            self.m.room_command("TV Room", action)
+        self.m.room_command("TV Room", "night_mode", True)
+        self.step()
+        self.assertEqual((self.tv.loudness, self.tv.night_mode, self.tv.dialog_mode, self.tv.surround_enabled),
+                         (False, True, True, False))
+
+    def test_tv_input(self):
+        self.m.room_command("TV Room", "tv")
+        self.step()
+        self.assertEqual(self.tv.calls, [("switch_to_tv",)])
+
+    def test_rendering_event_refreshes_settings_before_the_minute_is_up(self):
+        self.office.bass = 6  # changed outside, e.g. in the Sonos app
+        self.m._subs[("10.0.0.1", "renderingControl")].events.put(object())
+        self.step()
+        self.assertEqual(self.m.settings["Office"].bass, 6)
+
+    def test_settings_are_polled_every_minute_as_a_fallback(self):
+        self.office.bass = 4
+        self.step(100.0 + mon.SETTINGS_EVERY + 1)
+        self.assertEqual(self.m.settings["Office"].bass, 4)
+
+    def test_settings_change_is_notified(self):
+        before = len(self.seen)
+        self.m.room_command("Office", "bass_by", 2)
+        self.step()
+        self.assertGreater(len(self.seen), before)
+
+
+class SoundModel(unittest.TestCase):
+    def test_eq_text(self):
+        self.assertEqual(model.eq_text(0), "0")
+        self.assertEqual(model.eq_text(3), "+3")
+        self.assertEqual(model.eq_text(-2), "−2")
+        self.assertEqual(model.eq_text(None), "?")
+
+    def test_sound_items_only_list_what_the_room_has(self):
+        labels = lambda st: [i[0] for i in model.sound_items(st)]
+        play1 = RoomSettings(bass=2, treble=0, loudness=True)
+        self.assertEqual(labels(play1), ["Graves: +2", "Graves +1", "Graves −1", "Agudos: 0", "Agudos +1", "Agudos −1", "Loudness"])
+        bar = RoomSettings(0, 0, True, False, True, True, True)
+        self.assertEqual(labels(bar)[-4:], ["Modo noite", "Realce de diálogo", "Surround", "Áudio da TV"])
+        self.assertEqual(model.sound_items(None), [])
+        self.assertEqual(labels(RoomSettings()), [])
+
+    def test_sound_items_carry_action_arg_and_state(self):
+        by = {i[0]: i for i in model.sound_items(RoomSettings(0, 0, False, True, False, None, True))}
+        self.assertEqual(by["Graves −1"][1:], ("bass_by", -1, None))
+        self.assertEqual(by["Loudness"][1:], ("loudness", None, False))
+        self.assertEqual(by["Modo noite"][3], True)
+        self.assertEqual(by["Áudio da TV"][1], "tv")
+        self.assertNotIn("Surround", by)  # None: not supported
+        self.assertIsNone(by["Graves: 0"][1])  # info line
+
+    def test_house_key_reacts_to_settings(self):
+        g = [info()]
+        a, b = {"Office": RoomSettings(bass=0)}, {"Office": RoomSettings(bass=1)}
+        self.assertNotEqual(model.house_key(g, a), model.house_key(g, b))
+        self.assertEqual(model.house_key(g, a), model.house_key(g, dict(a)))
+
+    def test_tv_and_line_in_labels(self):
+        self.assertEqual(model.track_text(info(title="", artist="", uri="x-sonos-htastream:RINCON_1:spdif")), "TV")
+        self.assertEqual(model.track_text(info(title="", artist="", uri="x-rincon-stream:RINCON_1")), "Line-in")
+        self.assertEqual(model.track_text(info(title="", artist="", channel="Mac", uri="x-sonos-htastream:x")), "Mac")
 
 
 class HouseModel(unittest.TestCase):

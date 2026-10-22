@@ -57,9 +57,11 @@ Vem cedo porque a permissão de Rede Local define se o resto funciona.
   `ramp_to_volume` (a rampa nativa é lenta, 1,25 passo/s).
 - **Pronto quando:** o Mac toca no Office e na TV Room juntos, com volumes independentes.
 
-## Sprint 5: Som e entradas
+## Sprint 5: Som e entradas (FEITO)
 - EQ (graves, agudos, loudness); na Playbar: modo noite, realce de diálogo, sub e surround se existirem.
 - Botão "áudio da TV" (`switch_to_tv`) e line-in onde houver. A UI esconde o que o aparelho não suporta.
+- Feito: EQ, modo noite, realce de diálogo, surround e TV nas soundbars. Line-in ficou de fora (a API não revela quais
+  aparelhos têm entrada; nenhum dos seus tem). O botão TV foi coberto por teste unitário, não executado no aparelho real.
 
 ## Sprint 6: Favoritos, playlists, rádio, fila
 - `get_sonos_favorites` e `get_sonos_playlists` com tocar em um clique; fila atual; rádio por URL.
@@ -90,6 +92,21 @@ laranja de microfone enquanto há stream. Um process tap captura o áudio do sis
   API pouco documentada.
 - Alternativa descartada por ora: ScreenCaptureKit (áudio apenas), que exige Gravação de Tela.
 - Se o protótipo falhar, manter o BlackHole e documentar o indicador como inevitável.
+
+## Sprint 12: Localização da interface (en, es, fr; pt-BR é a base)
+Hoje todos os textos da UI estão em português, espalhados em `ui/menubar.py` e `ui/model.py`.
+- Centralizar as strings: um catálogo por idioma (`mac_sonos/ui/locales/{pt,en,es,fr}.json` ou `gettext`) e uma
+  função `t("chave", **vars)`; nada de texto de UI fora dele. Plurais e variáveis (`{rooms}`, `{pct}`) tratados no
+  catálogo, não por concatenação.
+- Idioma pelo sistema (`NSLocale.preferredLanguages`), com opção "Idioma" no menu (Automático, Português, English,
+  Español, Français) salva na config; fallback para inglês e depois para chaves ausentes.
+- Cobrir: itens de menu, estados ("Parado", "Interrompido no Sonos"...), avisos, diálogos (`rumps.alert`),
+  descrições de permissão do `Info.plist` (`InfoPlist.strings` por idioma: Microfone e Rede Local) e README.
+- Testes: todo idioma tem exatamente as mesmas chaves e as mesmas variáveis do pt (teste automático); nenhuma
+  string de UI fora do catálogo (teste que varre `ui/`).
+- Recomendação: antecipar a infraestrutura (catálogo + `t()`) antes de crescer mais a UI, com o pt como único idioma;
+  traduzir en/es/fr no fim. Cada sprint seguinte já nasce usando `t()`.
+- Risco: o menu muda de largura com o idioma (es/fr são mais longos); revisar textos de barra e abreviações.
 
 ## Ordem
 **0 → 1 → 2** é crítica: o empacotamento define se a Rede Local funciona para os eventos do sprint 3. Depois, 3 a 8 podem ser reordenados pelo que for mais usado.

@@ -17,6 +17,7 @@ log = logging.getLogger("mac_sonos")
 PLAYING, PAUSED, STOPPED, TRANSITIONING = "PLAYING", "PAUSED_PLAYBACK", "STOPPED", "TRANSITIONING"
 TOPOLOGY_EVERY = 10.0   # seconds between group-membership checks
 REDISCOVER_EVERY = 120.0
+SETTINGS_EVERY = 60.0   # sound settings are also re-read on events and after our commands
 
 
 def clamp_volume(v):
@@ -101,6 +102,31 @@ def read_group(coordinator, members, now=None, zones=()):
         position=parse_hms(track.get("position")), read_at=now or time.time())
 
 
+@dataclass(frozen=True)
+class RoomSettings:
+    """Sound settings of one room; None means the room does not have that setting."""
+    bass: int = None
+    treble: int = None
+    loudness: bool = None
+    night_mode: bool = None     # soundbars only
+    dialog_mode: bool = None    # soundbars only
+    surround: bool = None       # soundbars only
+    soundbar: bool = False
+
+
+def read_settings(zone):
+    def get(attr):
+        try:
+            return getattr(zone, attr)
+        except Exception:
+            return None
+    soundbar = bool(get("is_soundbar"))
+    return RoomSettings(
+        bass=get("bass"), treble=get("treble"), loudness=get("loudness"),
+        night_mode=get("night_mode"), dialog_mode=get("dialog_mode"),
+        surround=get("surround_enabled") if soundbar else None, soundbar=soundbar)
+
+
 @dataclass
 class _Group:
     coordinator: object            # SoCo
@@ -119,6 +145,10 @@ class Monitor:
         self._lock = threading.Lock()
         self._groups = {}              # coordinator name -> _Group
         self._ip_to_group = {}         # any member ip -> coordinator name
+        self._ip_to_room = {}          # any player ip -> room name
+        self._settings = {}            # room -> RoomSettings
+        self._settings_dirty = set()
+        self._settings_next = 0.0
         self._zones = []
         self._subs = {}                # (ip, service) -> Subscription
         self._dirty_ips = set()
@@ -135,6 +165,12 @@ class Monitor:
         """Latest GroupInfo of every group, sorted by coordinator name."""
         with self._lock:
             return sorted((g.info for g in self._groups.values() if g.info), key=lambda i: i.coordinator)
+
+    @property
+    def settings(self):
+        """Latest RoomSettings per room name."""
+        with self._lock:
+            return dict(self._settings)
 
     def start(self):
         self._thread = threading.Thread(target=self._loop, daemon=True, name="monitor")
@@ -153,7 +189,8 @@ class Monitor:
 
     def room_command(self, room, action, arg=None):
         """Queue a room command: volume (0-100), volume_by (relative), mute (bool, None toggles), join
-        (arg: coordinator name of the group to join) or unjoin. room=None with 'ungroup_all' splits every group."""
+        (arg: coordinator name of the group to join), unjoin, bass_by / treble_by (relative, -10..10), loudness /
+        night_mode / dialog_mode / surround (bool, None toggles) or tv (soundbars: switch to the TV input). room=None with 'ungroup_all' splits every group."""
         self._commands.put(("room", room, action, arg))
 
     # --- loop -----------------------------------------------------------------------------------
@@ -175,8 +212,27 @@ class Monitor:
             interval = self.poll_playing if g.info and g.info.state == PLAYING else self.poll_idle
             if g.dirty or g.info is None or now - g.last >= interval:
                 changed |= self._read(g, now)
+        changed |= self._refresh_settings(now)
         if changed and self._on_change:
             self._on_change(self.groups)
+
+    def _refresh_settings(self, now):
+        """Sound settings change rarely: read them on events, after our commands, and every minute."""
+        if now >= self._settings_next:
+            self._settings_next = now + SETTINGS_EVERY
+            self._settings_dirty |= set(self._ip_to_room.values())
+        dirty, self._settings_dirty = self._settings_dirty, set()
+        changed = False
+        for room in dirty:
+            try:
+                new = read_settings(self._find_zone(room))
+            except LookupError:
+                continue
+            if new != self._settings.get(room):
+                with self._lock:
+                    self._settings[room] = new
+                changed = True
+        return changed
 
     # --- topology and events --------------------------------------------------------------------
 
@@ -195,12 +251,13 @@ class Monitor:
             log.exception("topology refresh failed")
             self._zones, self._next_discover = [], 0.0  # rediscover next time
             return False
-        fresh, ip_map = {}, {}
+        fresh, ip_map, room_map = {}, {}, {}
         for group in all_groups:
             coordinator = group.coordinator
             by_name = {}
             for m in group.members:
                 ip_map[m.ip_address] = coordinator.player_name
+                room_map[m.ip_address] = m.player_name
                 # stereo pairs list two players under one name: only the visible one takes group commands
                 current = by_name.get(m.player_name)
                 if current is None or (not getattr(current, "is_visible", True) and getattr(m, "is_visible", True)):
@@ -215,7 +272,7 @@ class Monitor:
                 fresh[coordinator.player_name] = _Group(coordinator, tuple(names), zones)
         changed = {k: g.members for k, g in fresh.items()} != {k: g.members for k, g in self._groups.items()}
         with self._lock:
-            self._groups, self._ip_to_group = fresh, ip_map
+            self._groups, self._ip_to_group, self._ip_to_room = fresh, ip_map, room_map
         return changed
 
     @staticmethod
@@ -270,6 +327,8 @@ class Monitor:
                         self._next_topology = 0.0  # grouping changed: look at it on this very step
                     else:
                         self._dirty_ips.add(ip)
+                        if service == "renderingControl" and ip in self._ip_to_room:
+                            self._settings_dirty.add(self._ip_to_room[ip])
             except queue.Empty:
                 pass
         for ip in self._dirty_ips:
@@ -362,5 +421,15 @@ class Monitor:
             zone.join(group.coordinator)
         elif action == "unjoin":
             zone.unjoin()
+        elif action in ("bass_by", "treble_by"):
+            attr = action[:-3]
+            setattr(zone, attr, max(-10, min(10, getattr(zone, attr) + arg)))
+            self._settings_dirty.add(room)
+        elif action in ("loudness", "night_mode", "dialog_mode", "surround"):
+            attr = "surround_enabled" if action == "surround" else action
+            setattr(zone, attr, (not getattr(zone, attr)) if arg is None else bool(arg))
+            self._settings_dirty.add(room)
+        elif action == "tv":
+            zone.switch_to_tv()
         else:
             raise ValueError(f"unknown room action {action}")

@@ -27,6 +27,7 @@ class MenuBarApp(rumps.App):
         self.known_rooms = []
         self.ticks = 0
         self.groups = []        # latest from the monitor thread (a plain reference swap)
+        self.settings = {}      # room -> RoomSettings, same
         self.monitor = Monitor(on_change=self._on_groups)
         self._now_key = None
         self._time_items = {}   # coordinator -> menu item showing the position
@@ -168,6 +169,7 @@ class MenuBarApp(rumps.App):
 
     def _on_groups(self, groups):  # monitor thread
         self.groups = groups
+        self.settings = self.monitor.settings
 
     def _fetch_art(self, url):
         def work():
@@ -247,6 +249,16 @@ class MenuBarApp(rumps.App):
                 item.add(join)
                 if len(group.members) > 1:
                     item.add(rumps.MenuItem("Sair do grupo", callback=lambda _, r=room: self._room(r, "unjoin")))
+                sound = rumps.MenuItem("Som")
+                for label, action, arg, checked in model.sound_items(self.settings.get(room)):
+                    entry = rumps.MenuItem(label, callback=None if action is None else
+                                           (lambda _, r=room, a=action, v=arg: self._room(r, a, v)))
+                    if checked is not None:
+                        entry.state = int(checked)
+                    sound.add(entry)
+                if len(sound):
+                    item.add(None)
+                    item.add(sound)
                 self.house_menu.add(item)
                 self._house_items[room] = (item, label)
         self.house_menu.add(None)
@@ -254,7 +266,7 @@ class MenuBarApp(rumps.App):
         self.house_menu.add(rumps.MenuItem("Separar todos", callback=lambda _: self._room(None, "ungroup_all")))
 
     def _update_house(self):
-        key = model.house_key(self.groups)
+        key = model.house_key(self.groups, self.settings)
         if key != self._house_key:
             self._house_key = key
             self._rebuild_house()

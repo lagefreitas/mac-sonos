@@ -28,6 +28,10 @@ group and "Sair do grupo"; grouped rooms also get a group volume row. "Juntar to
 to the active group and "Separar todos" splits them. Stereo pairs show up as one room and are controlled through
 their visible player. Changes made elsewhere (the Sonos app, physical buttons) show up within a few seconds.
 
+**Som:** each room has a "Som" submenu with only what it supports: bass, treble and loudness (all rooms), and on
+soundbars night mode, speech enhancement ("Realce de diálogo"), surround and "Áudio da TV" (switches the soundbar to
+its TV input; if it was in a group, it leaves it). Line-in is not offered: the API cannot tell which players have one.
+
 **Interrompido:** if someone stops the Mac stream outside this app, the icon turns ⏸, the status says
 "Interrompido no Sonos", and the main button becomes "Ligar" to start it again (nothing restarts by itself).
 

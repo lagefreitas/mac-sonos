@@ -73,6 +73,11 @@ def track_text(info):
     """'Title – Artist', else the radio stream name, else a dash."""
     if info.title and info.artist:
         return f"{info.title} – {info.artist}"
+    if not info.title and not info.channel:
+        if info.uri.startswith("x-sonos-htastream:"):
+            return "TV"
+        if info.uri.startswith("x-rincon-stream:"):
+            return "Line-in"
     return info.title or info.channel or "—"
 
 
@@ -168,9 +173,10 @@ def house_rooms(groups):
     return out
 
 
-def house_key(groups):
-    """Changes when the house submenu must be rebuilt: rooms, grouping or mute (not volume)."""
-    return tuple((g.coordinator, g.members, tuple((n, m) for n, _, m in g.levels)) for g in groups)
+def house_key(groups, settings=None):
+    """Changes when the house submenu must be rebuilt: rooms, grouping, mute or sound settings (not volume)."""
+    return (tuple((g.coordinator, g.members, tuple((n, m) for n, _, m in g.levels)) for g in groups),
+            tuple(sorted((settings or {}).items())))
 
 
 def join_targets(groups, group):
@@ -183,3 +189,40 @@ def party_target(groups, rooms):
     mine = [g for g in groups if is_active(g) and set(rooms) & set(g.members)]
     playing = [g for g in groups if g.state == PLAYING]
     return (mine or playing or groups or [None])[0]
+
+
+# --- sound ---------------------------------------------------------------------------------------
+EQ_STEP = 1
+
+
+def eq_text(value):
+    if value is None:
+        return "?"
+    return "0" if value == 0 else f"{value:+d}".replace("-", "−")
+
+
+def sound_items(settings):
+    """(label, action, arg, checked) for a room's sound submenu; action None is an info line, checked
+    None is a plain item. Only what the room supports is listed."""
+    if settings is None:
+        return []
+    items = []
+    if settings.bass is not None:
+        items += [(f"Graves: {eq_text(settings.bass)}", None, None, None),
+                  (f"Graves +{EQ_STEP}", "bass_by", EQ_STEP, None),
+                  (f"Graves −{EQ_STEP}", "bass_by", -EQ_STEP, None)]
+    if settings.treble is not None:
+        items += [(f"Agudos: {eq_text(settings.treble)}", None, None, None),
+                  (f"Agudos +{EQ_STEP}", "treble_by", EQ_STEP, None),
+                  (f"Agudos −{EQ_STEP}", "treble_by", -EQ_STEP, None)]
+    if settings.loudness is not None:
+        items.append(("Loudness", "loudness", None, bool(settings.loudness)))
+    if settings.night_mode is not None:
+        items.append(("Modo noite", "night_mode", None, bool(settings.night_mode)))
+    if settings.dialog_mode is not None:
+        items.append(("Realce de diálogo", "dialog_mode", None, bool(settings.dialog_mode)))
+    if settings.surround is not None:
+        items.append(("Surround", "surround", None, bool(settings.surround)))
+    if settings.soundbar:
+        items.append(("Áudio da TV", "tv", None, None))
+    return items
