@@ -14,8 +14,19 @@ Mac output -> BlackHole -> ffmpeg (MP3) -> HTTP stream on the LAN -> Sonos plays
     .venv/bin/python mac_sonos.py run Office --volume 15    # stream to one room
     .venv/bin/python mac_sonos.py run Office "TV Room"      # grouped; first is leader
 
-While running, the Mac output is switched to BlackHole (restored on Ctrl-C). Control volume on the Sonos,
-not the Mac: BlackHole ignores the Mac volume keys.
+While running, the Mac output is switched to BlackHole and its volume set to 100% (output restored on Ctrl-C).
+Control volume on the Sonos, not the Mac: BlackHole uses the Mac volume as signal gain, so lowering it with
+the volume keys makes the stream near-silent.
+
+Options: `--format mp3|aac|flac|wav` (default mp3; aac/flac/wav are untested for latency, wav may not play),
+`--lowlat` (low-latency ffmpeg input flags; no measurable gain), `--bitrate`, `--volume`.
+
+## Latency benchmark (experimental)
+
+    .venv/bin/python mac_sonos.py bench Office --runs 3
+
+Measures the time from Sonos connecting to reporting PLAYING for each format. Results were inconsistent
+(except mp3, ~6 s), so treat it as a rough probe, not a reliable latency measurement.
 
 ## Notes
 

@@ -1,61 +1,119 @@
 #!/usr/bin/env python3
 """Stream the Mac's audio to Sonos speakers that lack AirPlay (Play:1, Playbar...).
 
-Mac output -> BlackHole (virtual device) -> ffmpeg (MP3) -> HTTP stream -> Sonos.
+Mac output -> BlackHole (virtual device) -> ffmpeg -> HTTP stream -> Sonos.
+Each Sonos connection gets its own ffmpeg, so a stream always starts at the live edge.
 """
 import argparse
-import queue
 import shutil
 import socket
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import soco
 
-clients = set()
-clients_lock = threading.Lock()
+# name -> (ffmpeg codec args, content type, default bitrate, play as mp3 radio)
+FORMATS = {
+    "mp3": (["-c:a", "libmp3lame", "-f", "mp3"], "audio/mpeg", "192k", True),
+    "aac": (["-c:a", "aac", "-f", "adts"], "audio/aac", "256k", True),
+    "flac": (["-c:a", "flac", "-compression_level", "0", "-f", "flac"], "audio/flac", None, False),
+    "wav": (["-c:a", "pcm_s16le", "-f", "wav"], "audio/wav", None, False),
+}
 
 
-def broadcast(chunk):
-    with clients_lock:
-        for q in clients:
-            try:
-                q.put_nowait(chunk)
-            except queue.Full:  # slow client: drop its oldest chunk
-                try:
-                    q.get_nowait()
-                    q.put_nowait(chunk)
-                except (queue.Empty, queue.Full):
-                    pass
+DIDL = (
+    '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
+    'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
+    'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
+    '<item id="R:0/0/0" parentID="R:0/0" restricted="true"><dc:title>Mac</dc:title>'
+    "<upnp:class>object.item.audioItem.audioBroadcast</upnp:class>"
+    '<res protocolInfo="http-get:*:{mime}:*">{url}</res></item></DIDL-Lite>'
+)
+
+
+def ffmpeg_cmd(cfg):
+    codec, _, default_br, _ = FORMATS[cfg["fmt"]]
+    cmd = ["ffmpeg", "-loglevel", "error"]
+    if cfg["lowlat"]:
+        cmd += ["-fflags", "+nobuffer", "-flags", "+low_delay", "-probesize", "32"]
+    cmd += ["-f", "avfoundation", "-i", f":{cfg['device']}", "-ac", "2", "-ar", "44100"]
+    bitrate = cfg["bitrate"] or default_br
+    if bitrate:
+        cmd += ["-b:a", bitrate]
+    return cmd + codec + ["-flush_packets", "1", "pipe:1"]
 
 
 class StreamHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "audio/mpeg")
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        q = queue.Queue(maxsize=200)
-        with clients_lock:
-            clients.add(q)
+        cfg = self.server.cfg
+        self.server.gets.append(time.time())
+        ff = subprocess.Popen(ffmpeg_cmd(cfg), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
-            while True:
-                self.wfile.write(q.get())
+            self.send_response(200)
+            self.send_header("Content-Type", FORMATS[cfg["fmt"]][1])
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            while chunk := ff.stdout.read1(4096):
+                self.wfile.write(chunk)
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
-            with clients_lock:
-                clients.discard(q)
+            ff.kill()
 
     def log_message(self, *args):
         pass
 
 
-def pump(proc):
-    while chunk := proc.stdout.read(4096):
-        broadcast(chunk)
+class Session:
+    """HTTP stream server plus Sonos group playing it."""
+
+    def __init__(self, rooms, device="BlackHole 2ch", fmt="mp3", port=8000, bitrate=None,
+                 lowlat=False, volume=None):
+        self.rooms, self.volume, self.fmt, self.port = rooms, volume, fmt, port
+        self.leader = rooms[0]
+        self.server = ThreadingHTTPServer(("0.0.0.0", port), StreamHandler)
+        self.server.cfg = dict(device=device, fmt=fmt, bitrate=bitrate, lowlat=lowlat)
+        self.server.gets = []
+
+    def start(self):
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.connect((self.leader.ip_address, 1400))
+        mac_ip = probe.getsockname()[0]
+        probe.close()
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        for s in self.rooms[1:]:
+            s.join(self.leader)
+        if self.volume is not None:
+            for s in self.rooms:
+                s.volume = self.volume
+        self.url = f"http://{mac_ip}:{self.port}/mac.{self.fmt}"
+        _, mime, _, radio = FORMATS[self.fmt]
+        if radio:
+            self.leader.play_uri(self.url, title="Mac", force_radio=True)
+        else:  # Sonos needs the MIME type in the metadata for non-radio http streams
+            meta = DIDL.format(mime=mime, url=self.url)
+            self.leader.play_uri(self.url, meta=meta)
+        return self.url
+
+    def playing(self):
+        return self.leader.get_current_transport_info()["current_transport_state"] == "PLAYING"
+
+    def stop(self):
+        self.server.shutdown()
+        self.server.server_close()
+        try:
+            self.leader.stop()
+            for s in self.rooms[1:]:
+                s.unjoin()
+            for _ in range(25):  # wait for the stop to land so a later session sees no stale PLAYING
+                if self.leader.get_current_transport_info()["current_transport_state"] != "PLAYING":
+                    break
+                time.sleep(0.2)
+        except Exception:
+            pass
 
 
 def find_rooms(names):
@@ -69,6 +127,39 @@ def find_rooms(names):
     return found
 
 
+def device_exists(name):
+    out = subprocess.run(["ffmpeg", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
+                         capture_output=True, text=True).stderr
+    return any(line.endswith("] " + name) for line in out.splitlines())
+
+
+def require_device(name):
+    if not device_exists(name):
+        sys.exit(f"Audio device '{name}' not found. If BlackHole is installed, load it with "
+                 "`sudo killall coreaudiod` (or reboot); otherwise see `mac_sonos.py devices`.")
+
+
+class OutputSwitch:
+    """Point the Mac output at the capture device; restore it on exit (needs SwitchAudioSource)."""
+
+    def __init__(self, device):
+        self.exe, self.device, self.previous = shutil.which("SwitchAudioSource"), device, None
+
+    def __enter__(self):
+        if self.exe:
+            self.previous = subprocess.run([self.exe, "-c"], capture_output=True, text=True).stdout.strip()
+            subprocess.run([self.exe, "-s", self.device], capture_output=True)
+            # BlackHole scales the signal by the Mac volume (31% ~ -50 dB, near silence)
+            subprocess.run(["osascript", "-e", "set volume output volume 100"], capture_output=True)
+        else:
+            print(f"Set the Mac's sound output to '{self.device}' (or: brew install switchaudio-osx).")
+        return self
+
+    def __exit__(self, *exc):
+        if self.exe and self.previous:
+            subprocess.run([self.exe, "-s", self.previous], capture_output=True)
+
+
 def cmd_list(_):
     for s in sorted(soco.discover(timeout=5) or [], key=lambda s: s.player_name):
         print(f"{s.player_name:20} {s.ip_address}  {s.get_speaker_info().get('model_name', '')}")
@@ -78,67 +169,71 @@ def cmd_devices(_):
     subprocess.run(["ffmpeg", "-f", "avfoundation", "-list_devices", "true", "-i", ""])
 
 
-def device_exists(name):
-    out = subprocess.run(["ffmpeg", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
-                         capture_output=True, text=True).stderr
-    return any(line.endswith("] " + name) for line in out.splitlines())
-
-
 def cmd_run(args):
-    if not device_exists(args.device):
-        sys.exit(f"Audio device '{args.device}' not found. If BlackHole is installed, load it with "
-                 "`sudo killall coreaudiod` (or reboot); otherwise see `mac_sonos.py devices`.")
+    require_device(args.device)
     rooms = find_rooms(args.rooms)
-    leader = rooms[0]
-    ip = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    ip.connect((leader.ip_address, 1400))
-    mac_ip = ip.getsockname()[0]
-    ip.close()
-
-    ffmpeg = subprocess.Popen(
-        ["ffmpeg", "-loglevel", "error", "-f", "avfoundation", "-i", f":{args.device}",
-         "-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", args.bitrate,
-         "-flush_packets", "1", "-f", "mp3", "pipe:1"],
-        stdout=subprocess.PIPE)
-    threading.Thread(target=pump, args=(ffmpeg,), daemon=True).start()
-
-    server = ThreadingHTTPServer(("0.0.0.0", args.port), StreamHandler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-
-    switch = shutil.which("SwitchAudioSource")
-    previous = None
-    if switch:
-        previous = subprocess.run([switch, "-c"], capture_output=True, text=True).stdout.strip()
-        subprocess.run([switch, "-s", args.device], capture_output=True)
-
-    for s in rooms[1:]:
-        s.join(leader)
-    if args.volume is not None:
-        for s in rooms:
-            s.volume = args.volume
-    url = f"http://{mac_ip}:{args.port}/mac.mp3"
-    leader.play_uri(url, title="Mac", force_radio=True)
-    print(f"Streaming Mac audio to {', '.join(s.player_name for s in rooms)} ({url})")
-    if not switch:
-        print(f"Set the Mac's sound output to '{args.device}' (or: brew install switchaudio-osx).")
-    print("Ctrl-C to stop.")
-
-    try:
-        ffmpeg.wait()
-        print("ffmpeg exited; is the BlackHole device name right? Try: mac_sonos.py devices")
-    except KeyboardInterrupt:
-        pass
-    finally:
-        ffmpeg.terminate()
-        server.shutdown()
+    with OutputSwitch(args.device):
+        session = Session(rooms, args.device, args.format, args.port, args.bitrate, args.lowlat, args.volume)
+        url = session.start()
+        print(f"Streaming Mac audio to {', '.join(s.player_name for s in rooms)} ({url}, {args.format})")
+        print("Ctrl-C to stop.")
         try:
-            leader.stop()
-            for s in rooms[1:]:
-                s.unjoin()
-        except Exception:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
             pass
-        if switch and previous:
-            subprocess.run([switch, "-s", previous], capture_output=True)
+        finally:
+            session.stop()
+
+
+# --- latency benchmark -------------------------------------------------------------------------
+# The source is live (1 s of audio per second), so the time Sonos waits between connecting to the
+# stream and reporting PLAYING is the depth of its start-up buffer, i.e. the latency it adds.
+
+def measure(session, timeout=30):
+    """Seconds from Sonos's first HTTP GET to the transport reporting PLAYING (None on timeout)."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if session.server.gets and session.playing():
+            return time.time() - session.server.gets[0]
+        time.sleep(0.2)
+    return None
+
+
+CONFIGS = {  # name -> Session kwargs
+    "mp3": dict(fmt="mp3"),
+    "mp3-lowlat": dict(fmt="mp3", lowlat=True),
+    "aac-lowlat": dict(fmt="aac", lowlat=True),
+    "flac-lowlat": dict(fmt="flac", lowlat=True),
+    "wav-lowlat": dict(fmt="wav", lowlat=True),
+}
+
+
+def cmd_bench(args):
+    require_device(args.device)
+    rooms = find_rooms(args.rooms)
+    results = {}
+    with OutputSwitch(args.device):
+        for name in args.configs or list(CONFIGS):
+            lat = []
+            for _ in range(args.runs):
+                session = Session(rooms, args.device, port=args.port, volume=args.volume, **CONFIGS[name])
+                try:
+                    session.start()
+                    m = measure(session)
+                except Exception as e:
+                    print(f"[{name}] failed: {e}", flush=True)
+                    m = None
+                finally:
+                    session.stop()
+                print(f"[{name}] {'timeout' if m is None else f'{m:.2f}s'} ({len(session.server.gets)} GETs)", flush=True)
+                if m is not None:
+                    lat.append(m)
+                time.sleep(3)
+            results[name] = lat
+    print("\nSummary (median seconds from connect to PLAYING):")
+    for name, lat in results.items():
+        print(f"  {name:12} " + (f"{sorted(lat)[len(lat) // 2]:.2f}s  {['%.1f' % x for x in lat]}" if lat else "n/a"))
 
 
 def main():
@@ -150,9 +245,19 @@ def main():
     r.add_argument("rooms", nargs="+", help="room names; first one is the group leader")
     r.add_argument("--device", default="BlackHole 2ch")
     r.add_argument("--port", type=int, default=8000)
-    r.add_argument("--bitrate", default="192k")
+    r.add_argument("--format", choices=FORMATS, default="mp3")
+    r.add_argument("--bitrate", help="mp3/aac bitrate, e.g. 192k")
+    r.add_argument("--lowlat", action="store_true", help="low-latency ffmpeg input flags")
     r.add_argument("--volume", type=int, help="set Sonos volume (0-100) on start")
     r.set_defaults(fn=cmd_run)
+    b = sub.add_parser("bench", help="measure Sonos start-up buffer (latency) per stream config")
+    b.add_argument("rooms", nargs="+")
+    b.add_argument("--configs", nargs="+", choices=CONFIGS)
+    b.add_argument("--device", default="BlackHole 2ch")
+    b.add_argument("--port", type=int, default=8000)
+    b.add_argument("--runs", type=int, default=3)
+    b.add_argument("--volume", type=int, default=15)
+    b.set_defaults(fn=cmd_bench)
     args = p.parse_args()
     args.fn(args)
 
