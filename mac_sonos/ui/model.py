@@ -3,13 +3,16 @@ import re
 
 from ..controller import CONNECTING, ERROR, STOPPED, STREAMING
 
-TITLES = {STOPPED: "🔈", CONNECTING: "🔄", STREAMING: "🔊", ERROR: "⚠️"}
+INTERRUPTED = "interrupted"  # we think we stream, but Sonos stopped or left our stream
+TITLES = {STOPPED: "🔈", CONNECTING: "🔄", STREAMING: "🔊", ERROR: "⚠️", INTERRUPTED: "⏸"}
 VOLUME_STEPS = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100]
 FORMAT_CHOICES = ["mp3", "aac"]
 RETRY_SECONDS = 10  # like the login loop: Wi-Fi, Sonos or BlackHole may not be ready yet
 
 
-def status_text(state):
+def status_text(state, interrupted=False):
+    if interrupted:
+        return "Interrompido no Sonos"
     if state.status == STREAMING:
         return "Tocando em " + ", ".join(state.rooms)
     if state.status == CONNECTING:
@@ -19,8 +22,8 @@ def status_text(state):
     return "Parado"
 
 
-def toggle_label(status):
-    return "Desligar" if status in (CONNECTING, STREAMING) else "Ligar"
+def toggle_label(status, interrupted=False):
+    return "Desligar" if status in (CONNECTING, STREAMING) and not interrupted else "Ligar"
 
 
 def toggle_room(selected, name):
@@ -124,3 +127,59 @@ def structure_key(groups):
     """Changes only when the now-playing submenu must be rebuilt (not for position ticks)."""
     return tuple((g.coordinator, g.members, g.state, track_text(g), g.art_url, tuple(controls(g)))
                  for g in groups if is_active(g))
+
+
+# --- stream reconciliation -----------------------------------------------------------------------
+from ..sonos.monitor import STOPPED as SONOS_STOPPED  # noqa: E402
+
+INTERRUPT_GRACE = 10  # seconds after the stream started during which Sonos may still be settling
+
+
+def is_interrupted(state, groups, now):
+    """True when we are streaming but the Sonos group of our leader stopped, paused or left our stream
+    (someone used the Sonos app, a physical button, or another source took the room)."""
+    if state.status != STREAMING or not state.rooms or now - state.started_at < INTERRUPT_GRACE:
+        return False
+    leader = state.rooms[0]
+    info = next((g for g in groups if leader in g.members), None)
+    if info is None or info.read_at < state.started_at:  # unknown, or a reading from before we started
+        return False
+    return not is_mac_stream(info) or info.state in (SONOS_STOPPED, PAUSED)
+
+
+# --- house: volume, mute and grouping ------------------------------------------------------------
+VOLUME_DELTA = 5
+
+
+def level_text(volume, muted):
+    if volume is None:
+        return "?"
+    return "🔇 mudo" if muted else f"{volume}%"
+
+
+def house_rooms(groups):
+    """(room, group, volume, muted) for every room, grouped rooms together, in group order."""
+    out = []
+    for g in groups:
+        levels = {name: (v, m) for name, v, m in g.levels}
+        for room in g.members:
+            v, m = levels.get(room, (None, None))
+            out.append((room, g, v, m))
+    return out
+
+
+def house_key(groups):
+    """Changes when the house submenu must be rebuilt: rooms, grouping or mute (not volume)."""
+    return tuple((g.coordinator, g.members, tuple((n, m) for n, _, m in g.levels)) for g in groups)
+
+
+def join_targets(groups, group):
+    """Coordinators of the other groups a room of `group` can join."""
+    return [g.coordinator for g in groups if g.coordinator != group.coordinator]
+
+
+def party_target(groups, rooms):
+    """The group everyone should join: ours if active, else the first playing one, else the first."""
+    mine = [g for g in groups if is_active(g) and set(rooms) & set(g.members)]
+    playing = [g for g in groups if g.state == PLAYING]
+    return (mine or playing or groups or [None])[0]

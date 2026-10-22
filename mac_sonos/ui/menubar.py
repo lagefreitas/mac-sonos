@@ -1,4 +1,5 @@
 """Menu bar app. All UI work happens on the main thread; the Controller does the rest."""
+import logging
 import signal
 import threading
 import time
@@ -11,6 +12,8 @@ from ..core import output
 from ..sonos import art, discovery
 from ..sonos.monitor import Monitor
 from . import loginitem, model
+
+log = logging.getLogger("mac_sonos")
 
 
 class MenuBarApp(rumps.App):
@@ -29,6 +32,9 @@ class MenuBarApp(rumps.App):
         self._time_items = {}   # coordinator -> menu item showing the position
         self._art_pending = set()
         self._art_ready = False
+        self.interrupted = False
+        self._house_key = None
+        self._house_items = {}  # room -> (menu item, volume label)
 
         self.status_item = rumps.MenuItem("Parado")
         self.warning_item = rumps.MenuItem("")
@@ -38,7 +44,8 @@ class MenuBarApp(rumps.App):
         self.track_item._menuitem.setHidden_(True)
         self.now_menu = rumps.MenuItem("Agora tocando")
         self.bar_item = rumps.MenuItem("Faixa na barra", callback=self.on_track_in_bar)
-        self.rooms_menu = rumps.MenuItem("Cômodos")
+        self.house_menu = rumps.MenuItem("Casa")
+        self.rooms_menu = rumps.MenuItem("Cômodos do Mac")
         self.volume_menu = rumps.MenuItem("Volume")
         for v in model.VOLUME_STEPS:
             self.volume_menu.add(rumps.MenuItem(f"{v}%", callback=self.on_volume))
@@ -49,13 +56,14 @@ class MenuBarApp(rumps.App):
         self.login_item = rumps.MenuItem("Abrir no login", callback=self.on_login_item)
         self.menu = [
             self.status_item, self.warning_item, self.toggle_item, self.track_item, None,
-            self.now_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
+            self.now_menu, self.house_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
             self.autostart_item, self.bar_item, self.login_item, rumps.MenuItem("Atualizar cômodos", callback=self.on_refresh),
             rumps.MenuItem("Sair", callback=self.on_quit),
         ]
         self._refresh_checks()
         self._rebuild_rooms()
         self._rebuild_now([])
+        self._rebuild_house()
         self.on_refresh(None)
         self.monitor.start()
         signal.signal(signal.SIGTERM, lambda *_: self.on_quit(None))  # runs on the next timer tick
@@ -78,7 +86,7 @@ class MenuBarApp(rumps.App):
         self._refresh_checks()
 
     def on_toggle(self, _):
-        if self._active():
+        if self._active() and not self.interrupted:
             self.want_stream = False
             self.ctl.stop()
         else:
@@ -195,6 +203,68 @@ class MenuBarApp(rumps.App):
                 self._fetch_art(g.art_url)
             self.now_menu.add(header)
 
+    # --- house: volume, mute, grouping ----------------------------------------------------------
+
+    def _room(self, room, action, arg=None):
+        self.monitor.room_command(room, action, arg)
+
+    def _party(self, _):
+        target = model.party_target(self.groups, self.cfg["rooms"])
+        if target:
+            self.monitor.command(target.coordinator, "partymode")
+
+    def _rebuild_house(self):
+        if len(self.house_menu):
+            self.house_menu.clear()
+        self._house_items = {}
+        d = model.VOLUME_DELTA
+        if not self.groups:
+            self.house_menu.add(rumps.MenuItem("Procurando…"))
+            return
+        for g in self.groups:
+            if len(g.members) > 1:
+                row = rumps.MenuItem(f"Grupo: {model.group_name(g)}")
+                row.add(rumps.MenuItem(f"Volume +{d}", callback=lambda _, c=g.coordinator: self.monitor.command(c, "volume_by", d)))
+                row.add(rumps.MenuItem(f"Volume −{d}", callback=lambda _, c=g.coordinator: self.monitor.command(c, "volume_by", -d)))
+                self.house_menu.add(row)
+            for room, group, volume, muted in model.house_rooms([g]):
+                text = model.level_text(volume, muted)
+                item = rumps.MenuItem(f"{room}  ·  {text}")
+                label = rumps.MenuItem(f"Volume: {text}")
+                item.add(label)
+                item.add(rumps.MenuItem(f"Volume +{d}", callback=lambda _, r=room: self._room(r, "volume_by", d)))
+                item.add(rumps.MenuItem(f"Volume −{d}", callback=lambda _, r=room: self._room(r, "volume_by", -d)))
+                mute = rumps.MenuItem("Mudo", callback=lambda _, r=room: self._room(r, "mute"))
+                mute.state = int(bool(muted))
+                item.add(mute)
+                item.add(None)
+                join = rumps.MenuItem("Juntar a")
+                targets = model.join_targets(self.groups, group)
+                for t in targets:
+                    join.add(rumps.MenuItem(t, callback=lambda _, r=room, t=t: self._room(r, "join", t)))
+                if not targets:
+                    join.add(rumps.MenuItem("—"))
+                item.add(join)
+                if len(group.members) > 1:
+                    item.add(rumps.MenuItem("Sair do grupo", callback=lambda _, r=room: self._room(r, "unjoin")))
+                self.house_menu.add(item)
+                self._house_items[room] = (item, label)
+        self.house_menu.add(None)
+        self.house_menu.add(rumps.MenuItem("Juntar todos (modo festa)", callback=self._party))
+        self.house_menu.add(rumps.MenuItem("Separar todos", callback=lambda _: self._room(None, "ungroup_all")))
+
+    def _update_house(self):
+        key = model.house_key(self.groups)
+        if key != self._house_key:
+            self._house_key = key
+            self._rebuild_house()
+            return
+        for room, _, volume, muted in model.house_rooms(self.groups):
+            if room in self._house_items:
+                item, label = self._house_items[room]
+                text = model.level_text(volume, muted)
+                item.title, label.title = f"{room}  ·  {text}", f"Volume: {text}"
+
     def _update_now(self):
         groups = self.groups
         active = [g for g in groups if model.is_active(g)]
@@ -223,11 +293,16 @@ class MenuBarApp(rumps.App):
             self._start()  # first tick: start once the menu is on screen
         if model.should_retry(state.status, self.want_stream, time.time() - self.last_attempt):
             self._start()
+        interrupted = model.is_interrupted(state, self.groups, time.time())
+        if interrupted != self.interrupted:
+            log.info("stream %s", "interrupted on the Sonos side" if interrupted else "back on the Sonos side")
+            self.interrupted = interrupted
         primary = self._update_now()
-        icon = model.TITLES[state.status]
+        self._update_house()
+        icon = model.TITLES[model.INTERRUPTED if interrupted else state.status]
         self.title = model.bar_title(icon, primary) if self.cfg["track_in_bar"] else icon
-        self.status_item.title = model.status_text(state)
-        self.toggle_item.title = model.toggle_label(state.status)
+        self.status_item.title = model.status_text(state, interrupted)
+        self.toggle_item.title = model.toggle_label(state.status, interrupted)
         warning = model.volume_warning(output.mac_volume()) if state.status == STREAMING and self.ticks % 5 == 0 else None
         if state.status != STREAMING or self.ticks % 5 == 0:
             self.warning_item._menuitem.setHidden_(warning is None)

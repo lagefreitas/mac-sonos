@@ -19,6 +19,10 @@ TOPOLOGY_EVERY = 10.0   # seconds between group-membership checks
 REDISCOVER_EVERY = 120.0
 
 
+def clamp_volume(v):
+    return max(0, min(100, int(v)))
+
+
 def parse_hms(text):
     """'0:02:35' -> 155; anything else (empty, NOT_IMPLEMENTED) -> 0."""
     try:
@@ -55,6 +59,7 @@ class GroupInfo:
     channel: str = ""       # radio stream name, e.g. "Mac"
     duration: int = 0       # seconds, 0 for streams
     actions: frozenset = frozenset()
+    levels: tuple = ()      # (room, volume, muted) per member; volume is None if unreadable
     # volatile: they change every second and must not count as a change
     position: int = field(default=0, compare=False)
     read_at: float = field(default=0.0, compare=False)
@@ -67,8 +72,18 @@ class GroupInfo:
         return min(pos, self.duration) if self.duration else pos
 
 
-def read_group(coordinator, members, now=None):
-    """Read the playback state of one group from its coordinator."""
+def read_levels(zones):
+    levels = []
+    for zone in zones:
+        try:
+            levels.append((zone.player_name, int(zone.volume), bool(zone.mute)))
+        except Exception:
+            levels.append((zone.player_name, None, None))
+    return tuple(levels)
+
+
+def read_group(coordinator, members, now=None, zones=()):
+    """Read the playback state of one group from its coordinator (and the volume of its rooms)."""
     state = coordinator.get_current_transport_info()["current_transport_state"]
     track = coordinator.get_current_track_info()
     channel = ""
@@ -82,7 +97,7 @@ def read_group(coordinator, members, now=None):
         coordinator=coordinator.player_name, members=tuple(members), state=state,
         title=track.get("title", ""), artist=track.get("artist", ""), album=track.get("album", ""),
         art_url=track.get("album_art", ""), uri=track.get("uri", ""), channel=channel,
-        duration=parse_hms(track.get("duration")), actions=actions,
+        duration=parse_hms(track.get("duration")), actions=actions, levels=read_levels(zones),
         position=parse_hms(track.get("position")), read_at=now or time.time())
 
 
@@ -90,6 +105,7 @@ def read_group(coordinator, members, now=None):
 class _Group:
     coordinator: object            # SoCo
     members: tuple
+    zones: tuple = ()              # one SoCo per room (stereo pairs appear once), coordinator first
     info: GroupInfo = None
     dirty: bool = True
     last: float = 0.0
@@ -104,7 +120,7 @@ class Monitor:
         self._groups = {}              # coordinator name -> _Group
         self._ip_to_group = {}         # any member ip -> coordinator name
         self._zones = []
-        self._subs = {}                # ip -> Subscription
+        self._subs = {}                # (ip, service) -> Subscription
         self._dirty_ips = set()
         self._commands = queue.Queue()
         self._next_topology = 0.0
@@ -131,8 +147,14 @@ class Monitor:
         self._unsubscribe_all()
 
     def command(self, coordinator, action, arg=None):
-        """Queue play/pause/next/previous/stop/seek (absolute seconds)/seek_by (relative seconds)."""
-        self._commands.put((coordinator, action, arg))
+        """Queue a group command: play/pause/next/previous/stop, seek (absolute seconds), seek_by (relative
+        seconds), volume_by (relative, every room of the group) or partymode (join everyone to the group)."""
+        self._commands.put(("group", coordinator, action, arg))
+
+    def room_command(self, room, action, arg=None):
+        """Queue a room command: volume (0-100), volume_by (relative), mute (bool, None toggles), join
+        (arg: coordinator name of the group to join) or unjoin. room=None with 'ungroup_all' splits every group."""
+        self._commands.put(("room", room, action, arg))
 
     # --- loop -----------------------------------------------------------------------------------
 
@@ -146,9 +168,9 @@ class Monitor:
 
     def _step(self, now):
         changed = self._run_commands(now)
+        self._drain_events()  # before the topology check: a topology event forces it
         if now >= self._next_topology:
             changed |= self._refresh_topology(now)
-        self._drain_events()
         for g in list(self._groups.values()):
             interval = self.poll_playing if g.info and g.info.state == PLAYING else self.poll_idle
             if g.dirty or g.info is None or now - g.last >= interval:
@@ -166,7 +188,9 @@ class Monitor:
                 self._next_discover = now + REDISCOVER_EVERY
                 for zone in self._zones:
                     self._subscribe(zone)
-            all_groups = self._zones[0].all_groups if self._zones else []
+                if self._zones:
+                    self._subscribe_topology(self._zones[0])
+            all_groups = self._fresh_groups(self._zones[0]) if self._zones else []
         except Exception:
             log.exception("topology refresh failed")
             self._zones, self._next_discover = [], 0.0  # rediscover next time
@@ -174,28 +198,48 @@ class Monitor:
         fresh, ip_map = {}, {}
         for group in all_groups:
             coordinator = group.coordinator
-            names = []
+            by_name = {}
             for m in group.members:
                 ip_map[m.ip_address] = coordinator.player_name
-                if m.player_name not in names:
-                    names.append(m.player_name)
-            names.sort(key=lambda n: n != coordinator.player_name)  # coordinator first
+                # stereo pairs list two players under one name: only the visible one takes group commands
+                current = by_name.get(m.player_name)
+                if current is None or (not getattr(current, "is_visible", True) and getattr(m, "is_visible", True)):
+                    by_name[m.player_name] = m
+            names = sorted(by_name, key=lambda n: n != coordinator.player_name)  # coordinator first
+            zones = tuple(by_name[n] for n in names)
             old = self._groups.get(coordinator.player_name)
             if old and old.members == tuple(names):
-                old.coordinator = coordinator
+                old.coordinator, old.zones = coordinator, zones
                 fresh[coordinator.player_name] = old
             else:
-                fresh[coordinator.player_name] = _Group(coordinator, tuple(names))
+                fresh[coordinator.player_name] = _Group(coordinator, tuple(names), zones)
         changed = {k: g.members for k, g in fresh.items()} != {k: g.members for k, g in self._groups.items()}
         with self._lock:
             self._groups, self._ip_to_group = fresh, ip_map
         return changed
 
-    def _subscribe(self, zone):
-        if zone.ip_address in self._subs:
-            return
+    @staticmethod
+    def _fresh_groups(zone):
+        """The groups as they are now: SoCo caches the topology and would lag behind a join/unjoin."""
         try:
-            self._subs[zone.ip_address] = zone.avTransport.subscribe(auto_renew=True)
+            zone.zone_group_state.clear_cache()
+        except AttributeError:
+            pass
+        return zone.all_groups
+
+    def _subscribe_topology(self, zone):
+        """Any one zone reports the whole house: its events tell us at once that the grouping changed."""
+        try:
+            if (zone.ip_address, "zoneGroupTopology") not in self._subs:
+                self._subs[(zone.ip_address, "zoneGroupTopology")] = zone.zoneGroupTopology.subscribe(auto_renew=True)
+        except Exception:
+            log.warning("topology subscription failed; relying on polling", exc_info=True)
+
+    def _subscribe(self, zone):
+        try:
+            for name in ("avTransport", "renderingControl"):  # what plays, and volume/mute
+                if (zone.ip_address, name) not in self._subs:
+                    self._subs[(zone.ip_address, name)] = getattr(zone, name).subscribe(auto_renew=True)
             log.info("monitor: subscribed to events of %s", zone.player_name)
         except Exception:
             if self.events_ok:
@@ -217,12 +261,15 @@ class Monitor:
             pass
 
     def _drain_events(self):
-        for ip, sub in self._subs.items():
+        for (ip, service), sub in self._subs.items():
             try:
                 while True:
                     sub.events.get_nowait()
-                    log.info("monitor: event from %s", ip)
-                    self._dirty_ips.add(ip)
+                    log.info("monitor: %s event from %s", service, ip)
+                    if service == "zoneGroupTopology":
+                        self._next_topology = 0.0  # grouping changed: look at it on this very step
+                    else:
+                        self._dirty_ips.add(ip)
             except queue.Empty:
                 pass
         for ip in self._dirty_ips:
@@ -236,7 +283,7 @@ class Monitor:
     def _read(self, group, now):
         group.last, group.dirty = now, False
         try:
-            info = read_group(group.coordinator, group.members, now)
+            info = read_group(group.coordinator, group.members, now, group.zones)
         except Exception:
             log.warning("reading %s failed", group.members[0], exc_info=True)
             return False
@@ -249,17 +296,24 @@ class Monitor:
         changed = False
         while True:
             try:
-                name, action, arg = self._commands.get_nowait()
+                kind, target, action, arg = self._commands.get_nowait()
             except queue.Empty:
                 return changed
-            group = self._groups.get(name)
-            if not group:
-                continue
             try:
-                self._execute(group, action, arg, now)
+                if kind == "group":
+                    group = self._groups.get(target)
+                    if not group:
+                        continue
+                    self._execute(group, action, arg, now)
+                    group.dirty = True
+                else:
+                    self._execute_room(target, action, arg)
+                    for g in self._groups.values():
+                        g.dirty = True
+                    if action in ("join", "unjoin", "ungroup_all"):
+                        self._next_topology = 0.0  # membership changed: look again right away
             except Exception:
-                log.warning("command %s on %s failed", action, name, exc_info=True)
-            group.dirty = True
+                log.warning("command %s on %s failed", action, target, exc_info=True)
 
     def _execute(self, group, action, arg, now):
         zone = group.coordinator
@@ -271,7 +325,42 @@ class Monitor:
             action, arg = "seek", max(target, 0)
         if action == "seek":
             zone.seek(format_hms(arg))
+        elif action == "volume_by":
+            for z in group.zones:
+                z.volume = clamp_volume(z.volume + arg)
+        elif action == "partymode":
+            zone.partymode()
         elif action in ("play", "pause", "next", "previous", "stop"):
             getattr(zone, action)()
         else:
             raise ValueError(f"unknown action {action}")
+
+    def _find_zone(self, room):
+        for group in self._groups.values():
+            for z in group.zones:
+                if z.player_name == room:
+                    return z
+        raise LookupError(f"room {room!r} not found")
+
+    def _execute_room(self, room, action, arg):
+        if action == "ungroup_all":
+            for group in self._groups.values():
+                for z in group.zones[1:]:
+                    z.unjoin()
+            return
+        zone = self._find_zone(room)
+        if action == "volume":
+            zone.volume = clamp_volume(arg)
+        elif action == "volume_by":
+            zone.volume = clamp_volume(zone.volume + arg)
+        elif action == "mute":
+            zone.mute = (not zone.mute) if arg is None else bool(arg)
+        elif action == "join":
+            group = self._groups.get(arg)
+            if not group:
+                raise LookupError(f"group {arg!r} not found")
+            zone.join(group.coordinator)
+        elif action == "unjoin":
+            zone.unjoin()
+        else:
+            raise ValueError(f"unknown room action {action}")

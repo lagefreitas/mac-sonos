@@ -23,6 +23,14 @@ album, cover art, position and only the controls that group supports right now (
 "Faixa na barra" puts it next to the icon. The state is refreshed from Sonos events (about 0.1 s) with polling
 as a fallback. `python -m mac_sonos nowplaying` prints the same live view in the terminal.
 
+**Casa:** every room of the house (not only the Mac's), with its volume and mute: +5 / −5, "Mudo", "Juntar a" another
+group and "Sair do grupo"; grouped rooms also get a group volume row. "Juntar todos (modo festa)" joins every room
+to the active group and "Separar todos" splits them. Stereo pairs show up as one room and are controlled through
+their visible player. Changes made elsewhere (the Sonos app, physical buttons) show up within a few seconds.
+
+**Interrompido:** if someone stops the Mac stream outside this app, the icon turns ⏸, the status says
+"Interrompido no Sonos", and the main button becomes "Ligar" to start it again (nothing restarts by itself).
+
 It warns if the Mac volume is not 100% and retries by itself every 10 s after an error (Wi-Fi/Sonos/BlackHole
 not ready yet). Choices are saved in the config file below.
 

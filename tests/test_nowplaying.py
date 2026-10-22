@@ -97,9 +97,14 @@ class FakeZone:
         self.player_name, self.ip_address = name, ip
         self.state, self.title, self.position, self.duration = PLAYING, "Song", "0:00:10", "0:03:20"
         self.available_actions = ["Play", "Pause", "Next", "SeekTime"]
+        self.volume, self.mute, self.is_visible = 20, False, True
         self.calls, self.groups_ref = [], groups_ref
         self.avTransport = mock.Mock()
         self.avTransport.subscribe.return_value = mock.Mock(events=queue.Queue())
+        self.zoneGroupTopology = mock.Mock()
+        self.zoneGroupTopology.subscribe.return_value = mock.Mock(events=queue.Queue())
+        self.renderingControl = mock.Mock()
+        self.renderingControl.subscribe.return_value = mock.Mock(events=queue.Queue())
 
     def get_current_transport_info(self):
         return {"current_transport_state": self.state}
@@ -116,7 +121,7 @@ class FakeZone:
         return self.groups_ref()
 
     def __getattr__(self, name):
-        if name in ("play", "pause", "next", "previous", "stop", "seek"):
+        if name in ("play", "pause", "next", "previous", "stop", "seek", "join", "unjoin", "partymode"):
             return lambda *a: self.calls.append((name, *a))
         raise AttributeError(name)
 
@@ -193,6 +198,136 @@ class MonitorTests(unittest.TestCase):
         self.groups = [FakeGroup(self.office, [self.office, self.tv])]
         self.m._step(100.0 + mon.TOPOLOGY_EVERY + 1)
         self.assertEqual([(g.coordinator, g.members) for g in self.m.groups], [("Office", ("Office", "TV Room"))])
+
+
+class HouseTests(MonitorTests):
+    """Volume, mute and grouping through the monitor (same fakes)."""
+
+    def setUp(self):
+        super().setUp()
+        self.m._step(100.0)
+
+    def run_cmds(self):
+        self.m._step(100.5)
+
+    def test_levels_are_read_per_room(self):
+        self.tv.volume, self.tv.mute = 35, True
+        self.m._groups["TV Room"].dirty = True
+        self.m._step(100.5)
+        tv = [g for g in self.m.groups if g.coordinator == "TV Room"][0]
+        self.assertEqual(tv.levels, (("TV Room", 35, True),))
+
+    def test_volume_and_mute_commands(self):
+        self.m.room_command("Office", "volume", 40)
+        self.m.room_command("Office", "volume_by", 5)
+        self.m.room_command("TV Room", "mute")
+        self.run_cmds()
+        self.assertEqual(self.office.volume, 45)
+        self.assertTrue(self.tv.mute)
+        self.m.room_command("TV Room", "mute")
+        self.m.room_command("TV Room", "mute", True)
+        self.run_cmds()
+        self.assertTrue(self.tv.mute)
+
+    def test_volume_is_clamped(self):
+        self.m.room_command("Office", "volume_by", 500)
+        self.m.room_command("TV Room", "volume_by", -500)
+        self.run_cmds()
+        self.assertEqual((self.office.volume, self.tv.volume), (100, 0))
+
+    def test_group_volume_moves_every_room(self):
+        self.groups = [FakeGroup(self.office, [self.office, self.tv])]
+        self.m._step(100.0 + mon.TOPOLOGY_EVERY + 1)
+        self.m.command("Office", "volume_by", 5)
+        self.m._step(100.0 + mon.TOPOLOGY_EVERY + 2)
+        self.assertEqual((self.office.volume, self.tv.volume), (25, 25))
+
+    def test_join_unjoin_party_and_ungroup_all(self):
+        self.m.room_command("TV Room", "join", "Office")
+        self.m.room_command("TV Room", "unjoin")
+        self.m.command("Office", "partymode")
+        self.run_cmds()
+        self.assertEqual(self.tv.calls, [("join", self.office), ("unjoin",)])
+        self.assertEqual(self.office.calls, [("partymode",)])
+        self.groups = [FakeGroup(self.office, [self.office, self.tv])]
+        self.m._step(100.0 + mon.TOPOLOGY_EVERY + 1)
+        self.m.room_command(None, "ungroup_all")
+        self.m._step(100.0 + mon.TOPOLOGY_EVERY + 2)
+        self.assertEqual(self.tv.calls[-1], ("unjoin",))
+
+    def test_membership_commands_force_a_topology_refresh(self):
+        self.m._next_topology = 999.0  # far in the future: only the command can trigger a refresh
+        self.m.room_command("TV Room", "join", "Office")
+        self.groups = [FakeGroup(self.office, [self.office, self.tv])]
+        self.run_cmds()
+        self.assertEqual([g.members for g in self.m.groups], [("Office", "TV Room")])
+
+    def test_topology_event_forces_a_refresh(self):
+        self.m._next_topology = 999.0
+        self.groups = [FakeGroup(self.office, [self.office, self.tv])]
+        self.m._subs[("10.0.0.1", "zoneGroupTopology")].events.put(object())
+        self.m._step(101.0)
+        self.assertEqual([g.members for g in self.m.groups], [("Office", "TV Room")])
+
+    def test_stereo_pair_commands_go_to_the_visible_player(self):
+        hidden = FakeZone("Office", "10.0.0.9", lambda: self.groups)  # same name, hidden secondary
+        hidden.is_visible = False
+        self.groups = [FakeGroup(self.office, [hidden, self.office]), FakeGroup(self.tv, [self.tv])]
+        self.m._next_topology = 0.0
+        self.m._step(101.0)
+        self.assertIs(self.m._find_zone("Office"), self.office)
+        self.m.room_command("Office", "join", "TV Room")
+        self.m._step(102.0)
+        self.assertEqual(self.office.calls[-1][0], "join")
+        self.assertEqual(hidden.calls, [])
+
+    def test_bad_targets_do_not_break_the_queue(self):
+        self.m.room_command("Nowhere", "mute")
+        self.m.room_command("TV Room", "join", "Nobody")
+        self.m.room_command("Office", "volume", 33)
+        self.run_cmds()
+        self.assertEqual(self.office.volume, 33)
+
+
+class HouseModel(unittest.TestCase):
+    def test_level_text(self):
+        self.assertEqual(model.level_text(20, False), "20%")
+        self.assertEqual(model.level_text(20, True), "🔇 mudo")
+        self.assertEqual(model.level_text(None, None), "?")
+
+    def test_house_rooms_and_key(self):
+        g = info(members=("Office", "TV Room"), levels=(("Office", 20, False), ("TV Room", 30, True)))
+        rooms = model.house_rooms([g])
+        self.assertEqual([(r, v, m) for r, _, v, m in rooms], [("Office", 20, False), ("TV Room", 30, True)])
+        louder = info(members=("Office", "TV Room"), levels=(("Office", 25, False), ("TV Room", 30, True)))
+        muted = info(members=("Office", "TV Room"), levels=(("Office", 20, True), ("TV Room", 30, True)))
+        self.assertEqual(model.house_key([g]), model.house_key([louder]))  # volume alone: no rebuild
+        self.assertNotEqual(model.house_key([g]), model.house_key([muted]))
+
+    def test_join_targets_exclude_own_group(self):
+        a, b = info(coordinator="A", members=("A",)), info(coordinator="B", members=("B",))
+        self.assertEqual(model.join_targets([a, b], a), ["B"])
+
+    def test_party_target(self):
+        a = info(coordinator="A", members=("A",), state=STOPPED)
+        b = info(coordinator="B", members=("B",))
+        self.assertIs(model.party_target([a, b], ["A"]), b)
+        self.assertIs(model.party_target([a], ["Z"]), a)
+        self.assertIsNone(model.party_target([], ["Z"]))
+
+    def test_interrupted_detection(self):
+        from mac_sonos.controller import State
+        mac_uri = "x-rincon-mp3radio://http://h:8000/mac.mp3"
+        st = State(status="streaming", rooms=["Office"], started_at=1000.0)
+        ok = info(members=("Office",), uri=mac_uri, read_at=1100.0)
+        self.assertFalse(model.is_interrupted(st, [ok], 1100.0))
+        self.assertTrue(model.is_interrupted(st, [info(members=("Office",), uri=mac_uri, state=STOPPED, read_at=1100.0)], 1100.0))
+        self.assertTrue(model.is_interrupted(st, [info(members=("Office",), uri="spotify:x", read_at=1100.0)], 1100.0))
+        # grace period, stale reading, unknown group, not streaming
+        self.assertFalse(model.is_interrupted(st, [info(members=("Office",), uri="x", state=STOPPED, read_at=1100.0)], 1005.0))
+        self.assertFalse(model.is_interrupted(st, [info(members=("Office",), uri="x", state=STOPPED, read_at=999.0)], 1100.0))
+        self.assertFalse(model.is_interrupted(st, [info(coordinator="Z", members=("Z",))], 1100.0))
+        self.assertFalse(model.is_interrupted(State(status="stopped", rooms=["Office"]), [ok], 1100.0))
 
 
 if __name__ == "__main__":

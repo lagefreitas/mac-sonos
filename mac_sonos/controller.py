@@ -24,6 +24,7 @@ class State:
     rooms: list = field(default_factory=list)
     url: str = None
     error: str = None
+    started_at: float = 0.0  # when the stream began (time.time())
 
 
 class Controller:
@@ -98,7 +99,7 @@ class Controller:
         self._stack.enter_context(output.OutputSwitch(device))
         self._session = session_mod.Session(speakers, device, fmt, port, bitrate, lowlat, volume)
         url = self._session.start()
-        self._set(status=STREAMING, url=url)
+        self._set(status=STREAMING, url=url, started_at=time.time())
 
     def _do_set_volume(self, volume):
         if self._session:

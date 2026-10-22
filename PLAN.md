@@ -48,9 +48,13 @@ Vem cedo porque a permissão de Rede Local define se o resto funciona.
 - **Pronto quando:** o estado do menu bate com o do app oficial, com atraso menor que 2 s.
 - **Risco:** eventos exigem que o Mac aceite conexões de entrada do Sonos; validar depois do empacotamento.
 
-## Sprint 4: Volume, mute e grupos
+## Sprint 4: Volume, mute e grupos (FEITO)
 - Slider por cômodo, mute, volume do grupo, agrupar/desagrupar (`join`/`unjoin`), mover áudio, modo festa (`partymode`), volume em rampa (`ramp_to_volume`).
 - Com grupo, o stream do Mac passa a ser do coordenador.
+- Feito: +5/−5 e mudo por cômodo, volume do grupo, juntar/sair, modo festa, separar todos, reconciliação do estado do
+  stream ("Interrompido no Sonos"). Slider fica para depois (menu de passos, sem como validar o NSSlider daqui).
+- Fora do escopo por ora: "mover áudio" (comportamento ao tirar o coordenador não validado sem tocar música) e
+  `ramp_to_volume` (a rampa nativa é lenta, 1,25 passo/s).
 - **Pronto quando:** o Mac toca no Office e na TV Room juntos, com volumes independentes.
 
 ## Sprint 5: Som e entradas
