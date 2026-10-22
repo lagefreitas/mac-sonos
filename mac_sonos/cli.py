@@ -82,6 +82,23 @@ def cmd_media_keys(_):
         print("Quartz/AppKit problem:", e)
 
 
+def cmd_tap_test(args):
+    from .core import tapcapture
+    if args.permission or args.request:
+        from .core import tapcapture as tc
+        print("system audio permission:", tc.audio_permission(), flush=True)
+        if args.request:
+            print("asking macOS (answer the dialog)...", flush=True)
+            print("answer:", tc.request_audio_permission(), "| now:", tc.audio_permission(), flush=True)
+        return
+    if args.ioproc:
+        result = tapcapture.probe_ioproc(args.seconds, args.output, mute_local=args.mute)
+        print(result, flush=True)
+    else:
+        result = tapcapture.measure(args.seconds, mute_local=args.mute, output_name=args.output)
+    sys.exit(1 if "error" in result else 0)
+
+
 def cmd_login_item(args):
     from .ui import loginitem
     names = {0: "not registered", 1: "enabled", 2: "requires approval (System Settings > General > Login Items)",
@@ -171,6 +188,14 @@ def main():
     r.set_defaults(fn=cmd_run)
     sub.add_parser("nowplaying", help="live view of what every Sonos group is playing").set_defaults(fn=cmd_nowplaying)
     sub.add_parser("media-keys", help="can this process capture media keys? (Accessibility permission)").set_defaults(fn=cmd_media_keys)
+    tt = sub.add_parser("tap-test", help="EXPERIMENT: capture system audio with a Core Audio process tap")
+    tt.add_argument("--seconds", type=float, default=3.0)
+    tt.add_argument("--output", help="name of the output device to use as the aggregate's clock")
+    tt.add_argument("--permission", action="store_true", help="only print the system audio permission state")
+    tt.add_argument("--request", action="store_true", help="ask macOS for the permission (shows its dialog)")
+    tt.add_argument("--ioproc", action="store_true", help="read through an IOProc on the aggregate (ctypes)")
+    tt.add_argument("--mute", action="store_true", help="also silence the local output while tapped")
+    tt.set_defaults(fn=cmd_tap_test)
     li = sub.add_parser("login-item", help="open at login (only inside Mac Sonos.app)")
     li.add_argument("action", choices=["status", "enable", "disable"])
     li.set_defaults(fn=cmd_login_item)
