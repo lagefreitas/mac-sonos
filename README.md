@@ -79,6 +79,27 @@ itself once you do. `"Mac Sonos" media-keys` (in `Contents/MacOS`) says whether 
 It warns if the Mac volume is not 100% and retries by itself every 10 s after an error (Wi-Fi/Sonos/BlackHole
 not ready yet). Choices are saved in the config file below.
 
+## Where the audio comes from: BlackHole or the system audio tap
+
+"Captura" in the menu (or `run --capture blackhole|tap`, `capture` in the config) picks the source:
+
+- **BlackHole** (default): the Mac's output is switched to the BlackHole virtual device and read like a microphone.
+  macOS shows its microphone indicator, and the Mac's volume is the signal level, so it must stay at 100% (the app warns).
+- **System audio (no BlackHole)**: a Core Audio process tap listens to what the Mac plays (macOS 14.2+). Nothing is
+  switched and BlackHole is not needed; the Mac's volume does not matter (the tap hears the audio before the volume);
+  with "Silenciar o Mac ao transmitir" (on by default) the Mac stays silent while it streams, like with BlackHole.
+  It needs the **System Audio Recording** permission (System Settings > Privacy & Security > Screen & System Audio
+  Recording). The first time, macOS shows its permission dialog by itself when the capture starts and holds the audio
+  back until you answer; after "Allow" it takes a moment to apply, so the app tries again a few times before giving up.
+  If it is refused or unanswered the status line says so, and you can add "Mac Sonos" to that list by hand.
+
+The tap is a private Core Audio tap and aggregate device (nothing appears in the system's device lists) read through an
+IOProc; the sample rate comes from Core Audio. Asking for the permission uses a private system API (`TCC.framework`),
+the only one that exists for it, so a future macOS may change that part. Diagnostics, run inside the bundle:
+`tap-test --permission`, `tap-test --source`, `tap-test --ioproc`. To try a build without touching the app you use,
+make a side-by-side bundle (it needs its own permissions):
+`DEST=/some/dir MAC_SONOS_APP_NAME="Mac Sonos Test" MAC_SONOS_BUNDLE_ID=io.github.lagefreitas.mac-sonos.test ./build-app.sh`
+
 ## Command line
 
     .venv/bin/python -m mac_sonos list                      # find rooms

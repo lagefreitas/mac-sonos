@@ -137,6 +137,11 @@ sendo o padrão).
 - Medido: o tap é pré-volume (volume do Mac 50% não muda o nível); entrega buffers também em silêncio; 47.957 quadros/s
   em 48.000 dentro do pacote assinado; cadeia completa com o Sonos real (PLAYING em 5,7 s, tom no stream HTTP, saída do Mac
   intocada). Corrigido de passagem: o handler HTTP deixava pipes abertos e zumbis de ffmpeg a cada conexão.
+- Verificado pelo usuário no app real (2026-10-22): escolher "Áudio do sistema" no menu funcionou. O log mostrou que o
+  diálogo de permissão do macOS aparece sozinho quando o tap começa (a permissão passou de "indeterminado" a "granted" em
+  ~2 s, durante a primeira tentativa) e que o macOS leva um instante para aplicá-la: a segunda tentativa, logo depois,
+  ainda falhou e a terceira funcionou. Por isso `TapCapture.start` agora espera a resposta do diálogo e tenta 3 vezes,
+  espaçadas, antes de dar o erro de permissão.
 - Não verificado: o pacote de teste não tem Rede Local, então a cadeia com o Sonos foi rodada do shell e o `TapCapture`
   separadamente dentro do pacote assinado; o indicador do macOS durante a captura; o pedido de permissão com um app que
   nunca foi consultado (o pacote de teste já tinha sido autorizado à mão).
