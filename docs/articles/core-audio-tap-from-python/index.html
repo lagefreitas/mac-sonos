@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en" data-lang="en" data-title-en="Capturing macOS system audio from Python with Core Audio taps — Mac Sonos" data-title-pt="Capturing macOS system audio from Python with Core Audio taps — Mac Sonos">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capturing macOS system audio from Python with Core Audio taps — Mac Sonos</title>
+<meta name="description" content="since macOS 14.2 you can listen to everything the Mac plays without installing a virtual audio driver, using a Core Audio process tap. It works from Python through PyObjC and ctypes, but several...">
+<meta name="author" content="André Lage-Freitas">
+<meta name="theme-color" content="#0b1020">
+<link rel="canonical" href="https://lagefreitas.github.io/mac-sonos/articles/core-audio-tap-from-python/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Capturing macOS system audio from Python with Core Audio taps">
+<meta property="og:description" content="since macOS 14.2 you can listen to everything the Mac plays without installing a virtual audio driver, using a Core Audio process tap. It works from Python through PyObjC and ctypes, but several...">
+<meta property="og:url" content="https://lagefreitas.github.io/mac-sonos/articles/core-audio-tap-from-python/">
+<meta property="og:image" content="https://lagefreitas.github.io/mac-sonos/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="article:author" content="André Lage-Freitas">
+<meta property="article:published_time" content="2026-10-22">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://lagefreitas.github.io/mac-sonos/og.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1020'/%3E%3Cpath d='M16 26h8l10-9v30l-10-9h-8z' fill='%23fff'/%3E%3Cpath d='M42 24c4 4 4 12 0 16M48 18c7 7 7 21 0 28' fill='none' stroke='%237aa7ff' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#ffffff; --bg2:#f4f6fa; --fg:#12161f; --muted:#55606f; --line:#dfe4ec; --card:#ffffff;
+  --accent:#1f5fe0; --accent-fg:#ffffff; --accent-soft:#e8efff; --code-bg:#0f1524; --code-fg:#e6ecff;
+  --warn-bg:#fff7e6; --warn-line:#f2d9a3; --shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.06);
+  --radius:14px; --maxw:1040px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0b1020; --bg2:#10172a; --fg:#e8ecf5; --muted:#a2adc0; --line:#222c44; --card:#121a2f;
+    --accent:#7aa7ff; --accent-fg:#0b1020; --accent-soft:#17234a; --code-bg:#070b16; --code-fg:#dfe7ff;
+    --warn-bg:#2a2210; --warn-line:#5b4a1d; --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+a{color:var(--accent);text-underline-offset:3px}
+a:hover{text-decoration-thickness:2px}
+img,svg{max-width:100%}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+/* language switching: every translated block carries a lang attribute */
+html[data-lang="en"] [lang="pt"],html[data-lang="pt"] [lang="en"]{display:none!important}
+
+/* text that is only in English but stays visible in the Portuguese view */
+html[data-lang="pt"] .keep[lang="en"]{display:revert!important}
+.story{max-width:68ch}
+.story p{color:var(--muted);font-size:17px}
+.story p:first-child{color:var(--fg)}
+.byline{margin:22px 0 14px;font-size:14px}
+.byline a{white-space:nowrap}
+
+/* header */
+header.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
+header.top .wrap{display:flex;align-items:center;gap:18px;height:58px}
+.brand{font-weight:700;letter-spacing:-.01em;color:var(--fg);text-decoration:none;display:flex;align-items:center;gap:9px}
+.brand .logo{width:26px;height:26px}
+nav.links{margin-left:auto;display:flex;gap:4px;align-items:center}
+nav.links a.l{color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;font-size:15px}
+nav.links a.l:hover{color:var(--fg);background:var(--bg2)}
+.lang{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-left:6px}
+.lang button{all:unset;cursor:pointer;padding:5px 10px;font-size:13px;font-weight:600;color:var(--muted)}
+.lang button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg)}
+.lang button:focus-visible,.btn:focus-visible,.tab:focus-visible,summary:focus-visible,.copy:focus-visible,nav.links a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:760px){nav.links a.l{display:none}}
+
+/* hero */
+.hero{padding:72px 0 56px;background:radial-gradient(1200px 400px at 70% -10%,var(--accent-soft),transparent 70%)}
+.eyebrow{display:inline-block;font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+h1{font-size:clamp(2.1rem,5.2vw,3.6rem);line-height:1.08;letter-spacing:-.03em;margin:0 0 18px;max-width:18ch}
+.lead{font-size:clamp(1.05rem,2vw,1.28rem);color:var(--muted);max-width:60ch;margin:0 0 28px}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:11px;font-weight:600;text-decoration:none;border:1px solid var(--line);color:var(--fg);background:var(--card)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn:hover{filter:brightness(1.06)}
+.fine{font-size:14px;color:var(--muted);max-width:70ch}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:34px}
+.fact{padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.fact b{display:block;font-size:15px}
+.fact span{font-size:14px;color:var(--muted)}
+
+/* sections */
+section{padding:60px 0}
+section.alt{background:var(--bg2)}
+h2{font-size:clamp(1.6rem,3.2vw,2.2rem);letter-spacing:-.02em;margin:0 0 10px;line-height:1.15}
+.sub{color:var(--muted);max-width:68ch;margin:0 0 30px}
+h3{font-size:1.08rem;margin:0 0 6px;letter-spacing:-.005em}
+p{margin:0 0 12px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
+.card{padding:18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow)}
+.card p{margin:0;color:var(--muted);font-size:15px}
+.card .ic{font-size:22px;line-height:1;margin-bottom:10px}
+
+/* how it works */
+.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;counter-reset:s;margin:0 0 22px;padding:0;list-style:none}
+.flow li{position:relative;padding:16px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);counter-increment:s}
+.flow li::before{content:counter(s);display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-fg);font-size:13px;font-weight:700;margin-bottom:8px}
+.flow li b{display:block;font-size:15px;margin-bottom:2px}
+.flow li span{font-size:14px;color:var(--muted)}
+.flow li:not(:last-child)::after{content:"→";position:absolute;right:-13px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:18px;z-index:2}
+@media (max-width:900px){.flow{grid-template-columns:1fr;gap:20px}.flow li:not(:last-child)::after{content:"↓";right:auto;left:50%;top:auto;bottom:-22px;transform:translateX(-50%)}}
+.note{padding:14px 16px;border:1px solid var(--warn-line);background:var(--warn-bg);border-radius:12px;font-size:15px}
+.two{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:22px}
+.two .card h3 small{font-weight:500;color:var(--muted)}
+ul.tight{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:15px}
+ul.tight li{margin:3px 0}
+
+/* menu tour */
+.tour{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:28px;align-items:start}
+@media (max-width:860px){.tour{grid-template-columns:1fr}}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tab{all:unset;cursor:pointer;padding:6px 12px;border:1px solid var(--line);border-radius:999px;font-size:13px;font-weight:600;color:var(--muted);background:var(--card)}
+.tab[aria-selected="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.menubar{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:6px 14px;border-radius:10px 10px 0 0;background:#1d2233;color:#e8ecf5;font-size:14px}
+.menubar .item{padding:2px 8px;border-radius:6px;background:rgba(255,255,255,.14)}
+.menu{border:1px solid var(--line);border-top:0;border-radius:0 0 12px 12px;background:var(--card);box-shadow:var(--shadow);padding:6px;font-size:14.5px;max-height:620px;overflow:auto}
+.menu ul{list-style:none;margin:0;padding:0}
+.menu li{margin:0}
+.menu .row{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;min-height:28px}
+.menu .check{width:14px;color:var(--accent);font-weight:700;flex:none}
+.menu details>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;min-height:28px}
+.menu details>summary::-webkit-details-marker{display:none}
+.menu details>summary::after{content:"›";margin-left:auto;color:var(--muted);font-size:17px;transition:transform .15s}
+.menu details[open]>summary::after{transform:rotate(90deg)}
+.menu details>summary:hover{background:var(--accent-soft)}
+.menu details>ul{margin:2px 0 4px 16px;padding-left:8px;border-left:2px solid var(--line)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:5px 6px}
+.tourtext p{color:var(--muted)}
+.tourtext ul{padding-left:20px;margin:8px 0 14px;color:var(--muted)}
+.tourtext li{margin:5px 0}
+.tourtext li b{color:var(--fg)}
+.caption{font-size:13.5px;color:var(--muted);margin-top:10px}
+
+/* install */
+.steps{counter-reset:st;list-style:none;padding:0;margin:0 0 8px}
+.steps>li{counter-increment:st;position:relative;padding:0 0 22px 46px}
+.steps>li::before{content:counter(st);position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font-weight:700;font-size:14px}
+.steps>li:not(:last-child)::after{content:"";position:absolute;left:14px;top:34px;bottom:4px;width:2px;background:var(--line)}
+pre{position:relative;margin:8px 0 0;padding:14px 64px 14px 16px;background:var(--code-bg);color:var(--code-fg);border-radius:11px;overflow:auto;font:13.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+code{font:0.92em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--bg2);padding:1px 6px;border-radius:6px}
+pre code{background:none;padding:0;font-size:inherit;color:inherit}
+.copy{all:unset;cursor:pointer;position:absolute;top:8px;right:8px;font-size:12px;font-weight:600;padding:4px 9px;border-radius:7px;background:rgba(255,255,255,.12);color:#cdd8ff}
+.copy:hover{background:rgba(255,255,255,.22)}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);margin-top:6px}
+.tablewrap tr:last-child td{border-bottom:0}
+
+footer{padding:40px 0 60px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+footer .cols{display:grid;gap:22px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+footer h4{margin:0 0 8px;color:var(--fg);font-size:14px}
+footer ul{list-style:none;padding:0;margin:0}
+footer li{margin:4px 0}
+.disclaimer{margin-top:28px;font-size:13px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+
+/* articles */
+.prose{max-width:74ch;padding:52px 0 72px}
+.prose h1{font-size:clamp(1.9rem,4.4vw,2.8rem);letter-spacing:-.025em;line-height:1.12;max-width:none;margin:0 0 10px}
+.prose .deck{font-size:1.2rem;color:var(--muted);margin:0 0 12px}
+.prose .meta{font-size:14px;color:var(--muted);margin:0 0 30px}
+.prose h2{font-size:1.5rem;letter-spacing:-.015em;margin:44px 0 12px;scroll-margin-top:76px}
+.prose p,.prose li{font-size:17px;line-height:1.72}
+.prose ul{padding-left:22px}
+.prose li{margin:7px 0}
+.prose .tldr{padding:14px 18px;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:10px;background:var(--card)}
+.prose pre{margin:18px 0;font-size:13px}
+.prose .back{margin-top:44px;font-size:15px}
+
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="../../#top" aria-label="Mac Sonos">
+      <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#0b1020"/><path d="M16 26h8l10-9v30l-10-9h-8z" fill="#fff"/><path d="M42 24c4 4 4 12 0 16M48 18c7 7 7 21 0 28" fill="none" stroke="#7aa7ff" stroke-width="4" stroke-linecap="round"/></svg>
+      Mac Sonos
+    </a>
+    <nav class="links" aria-label="Main">
+      <a class="l" href="../../#features"><span lang="en">Features</span><span lang="pt">Recursos</span></a>
+      <a class="l" href="../../#how"><span lang="en">How it works</span><span lang="pt">Como funciona</span></a>
+      <a class="l" href="../../#tour"><span lang="en">Menu tour</span><span lang="pt">Tour do menu</span></a>
+      <a class="l" href="../../#install"><span lang="en">Install</span><span lang="pt">Instalar</span></a>
+      <a class="l" href="https://github.com/lagefreitas/mac-sonos">GitHub</a>
+      <span class="lang" role="group" aria-label="Language">
+        <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-set-lang="pt" aria-pressed="false">PT</button>
+      </span>
+    </nav>
+  </div>
+</header>
+
+
+<main id="top">
+  <div class="wrap">
+    <article class="prose keep" lang="en">
+      <h1>Capturing macOS system audio from Python with Core Audio taps</h1>
+      <p class="deck">...and the traps I fell into on the way</p>
+      <p class="meta">By André Lage-Freitas · <a href="https://www.linkedin.com/in/lage/" rel="me">LinkedIn</a> · October 2026 · 5 min read</p>
+<p class="tldr"><strong>TL;DR:</strong> since macOS 14.2 you can listen to everything the Mac plays without installing a virtual audio driver, using a <em>Core Audio process tap</em>. It works from Python through PyObjC and <code>ctypes</code>, but several things fail silently or crash the process with no traceback. Here is a working 70-line example and the list of traps.</p>
+<h2 id="why-i-needed-it">Why I needed it</h2>
+<p>I wanted my old Sonos speakers (a few Play:1s and the first Playbar, which can't do AirPlay) to act as my Mac's speakers. My first version routed the Mac's output into <a href="https://existential.audio/blackhole/">BlackHole</a> and read it like a microphone. It worked, but it came with costs: the Mac's volume became the signal level (it had to stay at 100%), the output device had to be switched and restored, and macOS lit its microphone indicator the whole time.</p>
+<p>A process tap removes all three. This post is about getting one working from Python.</p>
+<h2 id="what-a-process-tap-is">What a process tap is</h2>
+<p>A tap (<code>CATapDescription</code>, macOS 14.2+) is a <em>listener</em> on the audio that processes send to the output. You create one, put it inside an aggregate device, and read that device like any other, with an IOProc. Three properties surprised me, each measured:</p>
+<ul>
+<li><strong>It hears the audio before the Mac's volume.</strong> I played the same tone with the output volume at 100%, 50% and 100% again: the captured peak was -49.0 dBFS every time. So the volume keys no longer affect what you capture.</li>
+<li><strong>It can silence the speakers while it listens.</strong> With <code>CATapMuted</code>, the BlackHole input I was watching went to digital silence while the tap kept hearing the tone; closing the tap brought it back.</li>
+<li><strong>It delivers buffers even when nothing plays</strong>, with zeros. "No callbacks" therefore means something is wrong, not that the Mac is quiet.</li>
+</ul>
+<h2 id="a-minimal-example">A minimal example</h2>
+<pre><code class="language-python">import ctypes
+import ctypes.util
+import time
+import uuid
+
+import CoreAudio as ca            # pip install pyobjc-framework-CoreAudio
+import objc
+
+
+def key(constant):                # PyObjC hands these kAudio*Key constants over as bytes; Core Audio wants str
+    return constant.decode() if isinstance(constant, bytes) else constant
+
+
+# 1. a global stereo tap, private to this process
+desc = objc.lookUpClass("CATapDescription").alloc().initStereoGlobalTapButExcludeProcesses_([])
+desc.setName_("demo tap")
+desc.setPrivate_(True)
+desc.setMuteBehavior_(ca.CATapUnmuted)  # CATapMuted would silence the speakers while we listen
+status, tap_id = ca.AudioHardwareCreateProcessTap(desc, None)
+assert status == 0, f"tap: OSStatus {status}"
+
+# 2. a private aggregate device that contains the tap (a private tap needs a private aggregate)
+status, agg_id = ca.AudioHardwareCreateAggregateDevice({
+    key(ca.kAudioAggregateDeviceNameKey): "demo tap",
+    key(ca.kAudioAggregateDeviceUIDKey): str(uuid.uuid4()),
+    key(ca.kAudioAggregateDeviceIsPrivateKey): True,
+    key(ca.kAudioAggregateDeviceTapListKey): [{
+        key(ca.kAudioSubTapUIDKey): str(desc.UUID().UUIDString()),
+        key(ca.kAudioSubTapDriftCompensationKey): True,
+    }],
+}, None)
+assert status == 0, f"aggregate: OSStatus {status}"
+
+
+# 3. read it with an IOProc through ctypes (PyObjC cannot hand the proc ID back to AudioDeviceStart)
+class Buffer(ctypes.Structure):
+    _fields_ = [("channels", ctypes.c_uint32), ("size", ctypes.c_uint32), ("data", ctypes.c_void_p)]
+
+
+class BufferList(ctypes.Structure):
+    _fields_ = [("count", ctypes.c_uint32), ("buffers", Buffer * 1)]
+
+
+IOProc = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_uint32, *[ctypes.c_void_p] * 6)
+lib = ctypes.CDLL(ctypes.util.find_library("CoreAudio"))
+lib.AudioDeviceCreateIOProcID.argtypes = [ctypes.c_uint32, IOProc, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+lib.AudioDeviceStart.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+lib.AudioDeviceStop.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+lib.AudioDeviceDestroyIOProcID.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+
+stats = {"calls": 0, "peak": 0.0}
+
+
+def on_audio(device, now, in_data, in_time, out_data, out_time, client):
+    stats["calls"] += 1
+    if in_data:
+        abl = ctypes.cast(in_data, ctypes.POINTER(BufferList)).contents
+        if abl.count and abl.buffers[0].data:
+            b = abl.buffers[0]
+            samples = (ctypes.c_float * (b.size // 4)).from_address(b.data)   # float32, interleaved
+            stats["peak"] = max(stats["peak"], max(map(abs, samples), default=0.0))
+    return 0
+
+
+callback = IOProc(on_audio)       # keep a reference, or it is garbage collected while Core Audio calls it
+proc = ctypes.c_void_p()
+lib.AudioDeviceCreateIOProcID(agg_id, callback, None, ctypes.byref(proc))
+lib.AudioDeviceStart(agg_id, proc)
+time.sleep(2)
+lib.AudioDeviceStop(agg_id, proc)
+lib.AudioDeviceDestroyIOProcID(agg_id, proc)
+ca.AudioHardwareDestroyAggregateDevice(agg_id)
+ca.AudioHardwareDestroyProcessTap(tap_id)
+print(f"{stats['calls']} callbacks in 2 s, peak {stats['peak']:.4f}")</code><button class="copy" type="button" data-copy>Copy</button></pre>
+<p>The same script is in the repository as <a href="https://github.com/lagefreitas/mac-sonos/blob/main/articles/tap_demo.py"><code>articles/tap_demo.py</code></a>.</p>
+<p>On my machine this prints <code>188 callbacks in 2 s, peak 0.0035</code> with a quiet tone playing (that is about -49 dBFS) and a peak of <code>0.0000</code> in silence. 188 callbacks in 2 s is about 94 a second: 512-frame buffers at 48 kHz.</p>
+<h2 id="the-traps">The traps</h2>
+<p><strong>1. A segfault with no traceback.</strong> The <code>kAudioAggregateDevice*Key</code> constants arrive from PyObjC as <code>bytes</code> (<code>b'name'</code>, <code>b'uid'</code>...). Put them in the dictionary as they are and <code>AudioHardwareCreateAggregateDevice</code> takes the whole process down: exit code 139, nothing on stderr. <code>python -X faulthandler</code> pointed at the line; the fix is to decode them to <code>str</code>.</p>
+<p><strong>2. A private tap needs a private aggregate.</strong> I first made the aggregate public so that PortAudio could list it. With a private tap and a public aggregate, everything succeeded (<code>OSStatus</code> 0, IOProc called ~94 times a second) but every call carried <strong>zero input buffers</strong>. No error anywhere. If you want a normal input device that PortAudio can open, make <em>both</em> the tap and the aggregate public; I measured 2 channels at 48 kHz that way. Otherwise keep both private, which also keeps the device out of the system's sound settings.</p>
+<p><strong>3. PyObjC can create the IOProc but not hand it back.</strong> <code>AudioDeviceCreateIOProcIDWithBlock</code> returns a status and an opaque pointer; passing that pointer to <code>AudioDeviceStart</code> raises <code>ValueError: calling method/function with 'undefined' argument</code>. Calling <code>AudioDeviceCreateIOProcID</code> through <code>ctypes</code>, as above, avoids the problem. Do wrap your callback body in <code>try/except</code> in real code: an exception cannot unwind into Core Audio's thread.</p>
+<p><strong>4. Without the permission it fails silently.</strong> In a fresh app identity the whole chain succeeded and the IOProc started (<code>OSStatus</code> 0 both times), but it was called <strong>zero</strong> times in three seconds. There is no error to catch. The permission is "System Audio Recording", and your <code>Info.plist</code> needs <code>NSAudioCaptureUsageDescription</code>.</p>
+<p><strong>5. The permission has no public API.</strong> What I found: the dialog appears by itself the first time audio I/O starts, and <code>TCCAccessPreflight</code> in the private <code>TCC.framework</code> reads the state (granted, denied or undetermined). There is also a <code>TCCAccessRequest</code> that takes an Objective-C block, which you can fake from <code>ctypes</code> with a global block structure; in my tests it never called back, so I rely on the automatic dialog and use the preflight only to <em>tell the user what is missing</em>. I would not build a product that depends on a private framework surviving a macOS update.</p>
+<p><strong>6. "Granted" takes a moment to apply.</strong> In my first real run the dialog appeared while the first attempt was waiting for audio, which is expected. But the next attempt, made right after I clicked Allow, also got nothing; the third, a few seconds later, worked. The app now waits for the answer and retries three times, 1.5 s apart, before reporting a permission problem.</p>
+<p><strong>7. An ad-hoc signature forgets the permission on every build.</strong> TCC identifies an app by its code requirement. An ad-hoc signature is a hash of the code, so each rebuild is a "new" app and the log says <code>Failed to match existing code requirement</code>. Signing with a self-signed certificate (kept in its own keychain, so nothing touches your login keychain) gives a stable requirement (<code>identifier "..." and certificate leaf = H"..."</code>) and the grant survives rebuilds.</p>
+<h2 id="getting-the-format-and-rate-from-core-audio-instead-of-guessing">Getting the format and rate from Core Audio instead of guessing</h2>
+<p>The tap's stream format is available as <code>kAudioTapPropertyFormat</code> (<code>'tfmt'</code>, a 40-byte <code>AudioStreamBasicDescription</code>), and the rate the aggregate really runs at as <code>kAudioDevicePropertyNominalSampleRate</code> (<code>'nsrt'</code>). Mine reported 48 000 Hz, and the samples were 32-bit float. My app reads both at start-up, refuses a format it does not handle, and converts to 16-bit integers for ffmpeg. In a 20-second run I received 47 923 frames a second against 48 000 expected (99.8%), with no gaps.</p>
+<h2 id="caveats">Caveats</h2>
+<ul>
+<li>macOS 14.2 or later; tested only on Apple silicon, on macOS 27.</li>
+<li>The permission calls rely on a private framework.</li>
+<li>Whether the macOS "recording" indicator for system audio differs from the microphone one is something I did not verify on my own screen, so I make no claim about it.</li>
+</ul>
+<h2 id="where-this-is-used">Where this is used</h2>
+<p>It is the optional "system audio" capture mode of <a href="https://github.com/lagefreitas/mac-sonos">Mac Sonos</a>, a menu bar app that plays the Mac's audio on Sonos speakers without AirPlay (MIT licensed). The code is in <code>mac_sonos/core/tapcapture.py</code>, with tests for the audio conversion and the permission retry logic.</p>
+<p><em>This project was built with <a href="https://claude.com/claude-code">Claude Code</a> (Claude Sonnet 5.5): I decided what to build and tested every step on my own speakers; it wrote most of the code. The measurements above are from my own machine. Claude Code Sonnet 5.5 also wrote this article, reviewed by me.</em></p>
+      <p class="back"><a href="../../">← Mac Sonos</a></p>
+    </article>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <h4>Mac Sonos</h4>
+        <ul>
+          <li><a href="https://github.com/lagefreitas/mac-sonos">GitHub</a></li>
+          <li><a href="https://github.com/lagefreitas/mac-sonos#readme"><span lang="en">Full documentation (README)</span><span lang="pt">Documentação completa (README)</span></a></li>
+          <li><a href="https://github.com/lagefreitas/mac-sonos/issues"><span lang="en">Report an issue</span><span lang="pt">Reportar um problema</span></a></li>
+          <li><a href="../../articles/core-audio-tap-from-python/"><span lang="en">Write-up: system audio from Python</span><span lang="pt">Artigo: áudio do sistema com Python (em inglês)</span></a></li>
+        </ul>
+      </div>
+      <div>
+        <h4><span lang="en">Built with</span><span lang="pt">Feito com</span></h4>
+        <ul>
+          <li><a href="https://github.com/SoCo/SoCo">SoCo</a> — Sonos</li>
+          <li><a href="https://existential.audio/blackhole/">BlackHole</a></li>
+          <li><a href="https://ffmpeg.org/">ffmpeg</a>, <a href="https://github.com/jaredks/rumps">rumps</a>, <a href="https://pyobjc.readthedocs.io/">PyObjC</a>, <a href="https://py2app.readthedocs.io/">py2app</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="byline keep" lang="en">Made by <b>André Lage-Freitas</b> · <a href="https://www.linkedin.com/in/lage/" rel="me">LinkedIn</a> · Built with <a href="https://claude.com/claude-code">Claude Code</a> (Claude Sonnet 5.5).</p>
+    <p class="disclaimer">
+      <span lang="en">Released under the <a href="https://github.com/lagefreitas/mac-sonos/blob/main/LICENSE">MIT License</a>.</span>
+      <span lang="pt">Publicado sob a <a href="https://github.com/lagefreitas/mac-sonos/blob/main/LICENSE">Licença MIT</a>.</span>
+      &nbsp;
+
+      <span lang="en">Mac Sonos is an independent project. It is not affiliated with, endorsed by, or sponsored by Sonos, Inc. Sonos, Play:1 and Playbar are trademarks of Sonos, Inc.; AirPlay and macOS are trademarks of Apple Inc.</span>
+      <span lang="pt">O Mac Sonos é um projeto independente. Não é afiliado, endossado nem patrocinado pela Sonos, Inc. Sonos, Play:1 e Playbar são marcas da Sonos, Inc.; AirPlay e macOS são marcas da Apple Inc.</span>
+    </p>
+  </div>
+</footer>
+
+
+<script>
+/* page language: the saved choice, else the browser's, else English */
+(function () {
+  const root = document.documentElement;
+  const stored = (function () { try { return localStorage.getItem("lang"); } catch (e) { return null; } })();
+  const wanted = stored || ((navigator.language || "en").toLowerCase().indexOf("pt") === 0 ? "pt" : "en");
+  function setLang(lang) {
+    root.setAttribute("data-lang", lang);
+    root.lang = lang;
+    const title = root.dataset[lang === "pt" ? "titlePt" : "titleEn"];
+    if (title) document.title = title;
+    document.querySelectorAll("[data-set-lang]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.setLang === lang)); });
+    document.querySelectorAll("[data-copy]").forEach(function (b) { b.textContent = lang === "pt" ? "Copiar" : "Copy"; });
+    try { localStorage.setItem("lang", lang); } catch (e) {}
+  }
+  document.querySelectorAll("[data-set-lang]").forEach(function (b) { b.addEventListener("click", function () { setLang(b.dataset.setLang); }); });
+  setLang(wanted === "pt" ? "pt" : "en");
+})();
+
+/* copy buttons: the Clipboard API when it answers, else the old way, so they also work where it does not */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await Promise.race([navigator.clipboard.writeText(text), new Promise(function (_, reject) { setTimeout(reject, 800); })]);
+      return true;
+    }
+  } catch (e) { /* fall through */ }
+  try {
+    const box = document.createElement("textarea");
+    box.value = text; box.setAttribute("readonly", ""); box.style.cssText = "position:fixed;opacity:0;top:0;left:0";
+    document.body.appendChild(box); box.select();
+    const ok = document.execCommand("copy");
+    box.remove();
+    return ok;
+  } catch (e) { return false; }
+}
+document.querySelectorAll("[data-copy]").forEach(function (btn) {
+  btn.addEventListener("click", async function () {
+    const text = btn.parentElement.querySelector("code").innerText;
+    const pt = document.documentElement.dataset.lang === "pt";
+    btn.textContent = (await copyText(text)) ? (pt ? "Copiado" : "Copied") : "—";
+    setTimeout(function () { btn.textContent = pt ? "Copiar" : "Copy"; }, 1400);
+  });
+});
+
+</script>
+</body>
+</html>

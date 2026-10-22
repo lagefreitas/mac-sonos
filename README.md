@@ -159,6 +159,13 @@ the committed page is out of date. The author's name and LinkedIn link live in `
 `linkedin` leaves the link out); the share image shown in link previews is `docs/og.png`, rendered from
 `tools/site/og.html` by `tools/build_og.sh` (needs Google Chrome).
 
+Articles live in `articles/*.md` and are listed in `tools/site/articles.json`; the generator converts them with
+`tools/minimd.py`, a small Markdown converter that refuses what it does not support (tables, block quotes, raw HTML...)
+instead of rendering it wrongly. To add one: write the Markdown, add an entry to `articles.json`, run the generator.
+`articles/tap_demo.py` is the runnable script from the first article (system audio capture from Python with a Core Audio
+tap), and a test keeps it identical to the code shown on the page. The generator also writes `docs/sitemap.xml` and
+`docs/robots.txt`.
+
 ## Notes
 
 - Latency is 3-10 s (Sonos buffers radio streams). Fine for music, not for video or calls.

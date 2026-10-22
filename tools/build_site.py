@@ -6,7 +6,9 @@ made-up rooms, songs and alarms, in each of the app's languages. Run it on a Mac
 template:  .venv/bin/python tools/build_site.py
 """
 import datetime
+import html
 import json
+import re
 import sys
 import tempfile
 import time
@@ -106,17 +108,75 @@ def menus():
     return out
 
 
+SITE = ROOT / "tools" / "site"
+
+
+def fill(template, root, author, links):
+    """Insert the parts every page shares; `root` is the path from the page back to the site's root."""
+    parts = {name: (SITE / file).read_text(encoding="utf-8")
+             for name, file in (("STYLE", "style.css"), ("HEADER", "header.html"), ("FOOTER", "footer.html"),
+                                ("COMMON_JS", "common.js"))}
+    page = template
+    for name in ("HEADER", "FOOTER"):   # these contain placeholders of their own
+        page = page.replace(f"__{name}__", parts[name])
+    for name in ("STYLE", "COMMON_JS"):
+        page = page.replace(f"__{name}__", parts[name])
+    return (page.replace("__ROOT__", root).replace("__AUTHOR_NAME__", author["name"])
+            .replace("__AUTHOR_LINKS__", links))
+
+
+SITE_URL = "https://lagefreitas.github.io/mac-sonos/"
+MONTHS = ("January February March April May June July August September October November December").split()
+
+
+def author_links(author):
+    # an empty value leaves the link out instead of publishing a wrong one
+    return f' · <a href="{author["linkedin"]}" rel="me">LinkedIn</a>' if author.get("linkedin") else ""
+
+
+def render_article(entry, author):
+    """(url, html) of one article, from its Markdown source (tools/site/articles.json lists them)."""
+    links = author_links(author)
+    sys.path.insert(0, str(ROOT / "tools"))
+    import minimd
+    article = minimd.convert((ROOT / entry["source"]).read_text(encoding="utf-8"))
+    when = datetime.date.fromisoformat(entry["date"])
+    url = f"{SITE_URL}articles/{entry['slug']}/"
+    summary = re.sub(r"^TL;DR:\s*", "", article.summary)
+    description = summary if len(summary) <= 200 else summary[:197].rsplit(" ", 1)[0] + "..."
+    page = fill((SITE / "article.html").read_text(encoding="utf-8"), root="../../", author=author, links=links)
+    values = {"__TITLE_ATTR__": html.escape(article.title, quote=True), "__TITLE__": html.escape(article.title, quote=False),
+              "__DESCRIPTION__": html.escape(description, quote=True), "__URL__": url, "__DATE__": entry["date"],
+              "__DATE_LABEL__": f"{MONTHS[when.month - 1]} {when.year}", "__MINUTES__": str(max(1, round(article.words / 200))),
+              "__DECK__": f'<p class="deck">{article.deck}</p>' if article.deck else "", "__BODY__": article.body}
+    for key in sorted(values, key=len, reverse=True):    # longest first: __TITLE_ATTR__ before __TITLE__
+        page = page.replace(key, values[key])
+    return url, page
+
+
+def article_page(entry, author):
+    url, page = render_article(entry, author)
+    out = ROOT / "docs" / "articles" / entry["slug"]
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "index.html").write_text(page, encoding="utf-8")
+    return url
+
+
 def main():
     template = (ROOT / "tools" / "site" / "template.html").read_text(encoding="utf-8")
     author = json.loads((ROOT / "tools" / "site" / "author.json").read_text(encoding="utf-8"))
-    links = ""
-    if author.get("linkedin"):   # an empty value leaves the link out instead of publishing a wrong one
-        links += f' · <a href="{author["linkedin"]}" rel="me">LinkedIn</a>'
+    links = author_links(author)
     data = menus()
-    page = (template.replace("__MENUS__", json.dumps(data, ensure_ascii=False))
-            .replace("__AUTHOR_NAME__", author["name"]).replace("__AUTHOR_LINKS__", links))
+    page = fill(template, root="", author=author, links=links).replace("__MENUS__", json.dumps(data, ensure_ascii=False))
     (ROOT / "docs").mkdir(exist_ok=True)
     (ROOT / "docs" / "index.html").write_text(page, encoding="utf-8")
+    urls = [SITE_URL] + [article_page(e, author)
+                         for e in json.loads((SITE / "articles.json").read_text(encoding="utf-8"))]
+    (ROOT / "docs" / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "".join(f"  <url><loc>{u}</loc></url>\n" for u in urls) + "</urlset>\n", encoding="utf-8")
+    (ROOT / "docs" / "robots.txt").write_text(f"User-agent: *\nAllow: /\n\nSitemap: {SITE_URL}sitemap.xml\n", encoding="utf-8")
+    print(f"articles: {len(urls) - 1} | sitemap: {len(urls)} URLs")
     count = sum(1 for _ in json.dumps(data["en"]).split('"title"')) - 1
     print(f"docs/index.html written: {len(page):,} bytes, {count} menu entries per language, languages {sorted(data)}")
 
