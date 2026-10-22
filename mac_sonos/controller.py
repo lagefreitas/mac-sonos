@@ -10,7 +10,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from .core import output, session as session_mod
+from .core import capture as capture_mod, output, session as session_mod
 from .sonos import discovery
 
 log = logging.getLogger("mac_sonos")
@@ -43,9 +43,10 @@ class Controller:
     # --- commands (thread-safe, non-blocking) ---------------------------------------------------
 
     def start(self, rooms, device="BlackHole 2ch", fmt="mp3", port=8000, bitrate=None, lowlat=False,
-              volume=None):
-        self._queue.put(("start", dict(rooms=list(rooms), device=device, fmt=fmt, port=port,
-                                       bitrate=bitrate, lowlat=lowlat, volume=volume)))
+              volume=None, capture=capture_mod.BLACKHOLE, mute_mac=True):
+        """`capture`: "blackhole" (the `device`) or "tap" (system audio, no BlackHole; `mute_mac` silences the Mac)."""
+        self._queue.put(("start", dict(rooms=list(rooms), device=device, fmt=fmt, port=port, bitrate=bitrate,
+                                       lowlat=lowlat, volume=volume, capture=capture, mute_mac=mute_mac)))
 
     def stop(self, volume=None):
         """Stop streaming; with `volume`, set the rooms to it afterwards (e.g. undo a fade-out)."""
@@ -94,14 +95,17 @@ class Controller:
                 self._set(status=ERROR, error=str(e), error_key=getattr(e, "key", None),
                           error_vars=getattr(e, "vars", None))
 
-    def _do_start(self, rooms, device, fmt, port, bitrate, lowlat, volume):
+    def _do_start(self, rooms, device, fmt, port, bitrate, lowlat, volume, capture, mute_mac):
         self._do_stop()
         self._set(status=CONNECTING, rooms=list(rooms), url=None, error=None, error_key=None, error_vars=None)
-        output.require_device(device)
+        source = capture_mod.make_capture(capture, device, mute_mac)
+        source.prepare()
         speakers = discovery.find_rooms(rooms)
         self._stack = contextlib.ExitStack()
-        self._stack.enter_context(output.OutputSwitch(device))
-        self._session = session_mod.Session(speakers, device, fmt, port, bitrate, lowlat, volume)
+        self._stack.enter_context(source.output_context())
+        source.start()
+        self._stack.callback(source.stop)   # undone after the session stops, before the output is restored
+        self._session = session_mod.Session(speakers, source, fmt, port, bitrate, lowlat, volume)
         url = self._session.start()
         self._set(status=STREAMING, url=url, started_at=time.time())
 

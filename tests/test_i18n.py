@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from mac_sonos import controller, i18n
-from mac_sonos.core import output
+from mac_sonos.core import output, tapcapture
 from mac_sonos.sonos import discovery
 from mac_sonos.ui import model
 
@@ -164,6 +164,7 @@ class CodeAgainstCatalog(unittest.TestCase):
         catalog = i18n.catalog("pt")
         self.assertIn(output.DeviceNotFound.key, catalog)
         self.assertIn(discovery.RoomNotFound.key, catalog)
+        self.assertIn(tapcapture.TapPermissionError.key, catalog)
 
 
 class NoUiTextInCode(unittest.TestCase):

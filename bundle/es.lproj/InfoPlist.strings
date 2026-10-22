@@ -1,2 +1,3 @@
 "NSMicrophoneUsageDescription" = "Mac Sonos captura el audio de salida del Mac (mediante BlackHole) para enviarlo a Sonos.";
 "NSLocalNetworkUsageDescription" = "Mac Sonos encuentra tus altavoces Sonos y les transmite el audio del Mac.";
+"NSAudioCaptureUsageDescription" = "Mac Sonos escucha el audio que reproduce el Mac (audio del sistema) para enviarlo a Sonos.";

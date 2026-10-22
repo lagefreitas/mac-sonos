@@ -107,6 +107,40 @@ laranja de microfone enquanto há stream. Um process tap captura o áudio do sis
 - Alternativa descartada por ora: ScreenCaptureKit (áudio apenas), que exige Gravação de Tela.
 - Se o protótipo falhar, manter o BlackHole e documentar o indicador como inevitável.
 
+**Resultado do protótipo (branch `sprint-11-process-tap`, macOS 27, PyObjC 12.2):** VIÁVEL.
+- Funciona: tap global estéreo (`CATapDescription` + `AudioHardwareCreateProcessTap`) exposto por um dispositivo agregado,
+  lido por IOProc (ctypes) ou pelo PortAudio, dentro do pacote assinado com identidade própria. Captura contínua: 47.923
+  quadros/s medidos em 20 s contra 48.000 esperados. Com `CATapMuted` a saída local fica muda enquanto o tap ouve, então
+  o Mac fica em silêncio sem trocar a saída (adeus BlackHole, `SwitchAudioSource` e volume do Mac a 100%).
+- Armadilhas: as constantes `kAudioAggregateDevice*Key` vêm como `bytes` do PyObjC e derrubam o CoreAudio (converter para
+  `str`); tap privado exige agregado privado (senão 0 buffers); o agregado só expõe entradas ao PortAudio com tap e
+  agregado públicos; o identificador do IOProc não passa pelo PyObjC (usar ctypes).
+- Permissão: o macOS segura o áudio (0 chamadas) até o app ter "Gravação de áudio do sistema"; o estado inicial é
+  "indeterminado" e o pedido de permissão só tem API privada (`TCCAccessRequest`/`TCCAccessPreflight`, TCC.framework).
+  Depois de concedida, tudo flui. Exige `NSAudioCaptureUsageDescription` (já traduzida em pt/en/es/fr nesta branch).
+- Trabalho para integrar (não feito): backend de captura selecionável (BlackHole ou tap) no `Controller`/`stream.py`;
+  remover a troca de saída quando o tap estiver em uso; fluxo de permissão no menu (estado, pedido, orientação);
+  tap criado só enquanto há stream (como a captura de hoje, por conexão); limpeza do agregado ao sair ou cair (o tap
+  some com o processo, mas um agregado público não); testes com dublês; decidir o que fazer se a API privada de
+  permissão mudar (sem ela o usuário adiciona o app à mão em Ajustes).
+- Não verificado: o indicador exato que o macOS mostra durante a captura.
+
+**Integração (branch `sprint-11-process-tap`): FEITA como alternativa selecionável**, não substituição (BlackHole segue
+sendo o padrão).
+- `core/capture.py`: `BlackHoleCapture` e `TapCapture` com a mesma interface (`prepare`, `output_context`, `start`,
+  `stop`, `rate`, `open(push)`); `Session`, `StreamHandler` e `Controller` passaram a usar uma captura, e o ffmpeg recebe a
+  taxa da captura. `TapSource` (tap privado + agregado privado + IOProc, só o tap, sem dispositivo de relógio) lê o formato e
+  a taxa do CoreAudio, converte float32 para int16 e distribui para um leitor por conexão. Menu "Captura" (fonte e
+  "Silenciar o Mac ao transmitir"), `run --capture`, erro de permissão traduzido, aviso de volume só para o BlackHole.
+- Fluxo de permissão: tenta capturar; se não chega áudio, consulta o estado, pede uma vez se "indeterminado" e tenta de
+  novo; recusa ou ausência de resposta viram o erro "precisa da permissão de Gravação de Áudio do Sistema".
+- Medido: o tap é pré-volume (volume do Mac 50% não muda o nível); entrega buffers também em silêncio; 47.957 quadros/s
+  em 48.000 dentro do pacote assinado; cadeia completa com o Sonos real (PLAYING em 5,7 s, tom no stream HTTP, saída do Mac
+  intocada). Corrigido de passagem: o handler HTTP deixava pipes abertos e zumbis de ffmpeg a cada conexão.
+- Não verificado: o pacote de teste não tem Rede Local, então a cadeia com o Sonos foi rodada do shell e o `TapCapture`
+  separadamente dentro do pacote assinado; o indicador do macOS durante a captura; o pedido de permissão com um app que
+  nunca foi consultado (o pacote de teste já tinha sido autorizado à mão).
+
 ## Sprint 12: Localização da interface (en, es, fr; pt-BR é a base) — FEITO
 Hoje todos os textos da UI estão em português, espalhados em `ui/menubar.py` e `ui/model.py`.
 - Centralizar as strings: um catálogo por idioma (`mac_sonos/ui/locales/{pt,en,es,fr}.json` ou `gettext`) e uma

@@ -120,5 +120,10 @@
   "login.only_app": "Only available in Mac Sonos.app (see build-app.sh).",
   "login.approve": "Approve Mac Sonos in System Settings > General > Login Items.",
   "error.device_not_found": "Audio device '{device}' not found. If BlackHole is installed, load it with `sudo killall coreaudiod` (or restart); see `python -m mac_sonos devices`.",
-  "error.room_not_found": "Room '{room}' not found. Available: {available}"
+  "error.room_not_found": "Room '{room}' not found. Available: {available}",
+  "menu.capture": "Capture",
+  "capture.blackhole": "BlackHole",
+  "capture.tap": "System audio (no BlackHole)",
+  "capture.mute_mac": "Mute the Mac while streaming",
+  "error.tap_permission": "Mac Sonos needs the System Audio Recording permission (System Settings > Privacy & Security)."
 }

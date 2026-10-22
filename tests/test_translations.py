@@ -12,16 +12,16 @@ LANGS = ("en", "es", "fr")
 # Values that are legitimately the same as the Portuguese ones (shared words, loanwords, formats). A new key left
 # untranslated would show up as a difference from these lists, and the test asks for a decision.
 SAME_AS_PT = {
-    "en": {"menu.volume", "library.playlists", "library.group", "dialog.ok", "sleep.minutes", "alarm.title",
+    "en": {"capture.blackhole", "menu.volume", "library.playlists", "library.group", "dialog.ok", "sleep.minutes", "alarm.title",
            "alarm.volume", "alarm.volume_up", "alarm.volume_down", "transport.back", "transport.forward", "track.tv",
            "track.line_in", "house.volume_label", "house.volume_up", "house.volume_down", "sound.loudness",
            "sound.surround"},
-    "es": {"status.connecting", "menu.house", "menu.format", "menu.language", "menu.language_auto", "menu.library",
+    "es": {"capture.blackhole", "menu.capture", "status.connecting", "menu.house", "menu.format", "menu.language", "menu.language_auto", "menu.library",
            "menu.favorites", "library.group", "dialog.ok", "dialog.cancel", "sleep.minutes", "alarm.title",
            "alarm.repeat", "alarm.day.0", "alarm.day.6", "transport.previous", "transport.pause", "transport.back",
            "transport.forward", "track.tv", "house.group", "sound.bass", "sound.bass_up", "sound.bass_down",
            "sound.treble", "sound.treble_up", "sound.treble_down"},
-    "fr": {"menu.volume", "library.playlists", "library.group", "dialog.ok", "sleep.minutes", "menu.alarms",
+    "fr": {"capture.blackhole", "menu.volume", "library.playlists", "library.group", "dialog.ok", "sleep.minutes", "menu.alarms",
            "alarm.title", "alarm.volume_up", "alarm.volume_down", "transport.back", "transport.forward", "track.tv",
            "house.volume_up", "house.volume_down", "sound.bass_up", "sound.bass_down", "sound.loudness",
            "sound.surround"},
@@ -30,7 +30,7 @@ LONG_TEXT = {"alarm.time_prompt", "alarm.new_time_prompt", "alarm.invalid_time",
              "radio.invalid_url", "scene.invalid", "scene.name_prompt", "media.permission", "login.only_app",
              "login.approve", "warning.mac_volume", "error.device_not_found", "error.room_not_found"}
 MENU_PREFIXES = ("menu.", "transport.", "house.", "sound.", "sleep.", "alarm.", "scene.", "library.", "queue.",
-                 "radio.", "now.", "status.", "toggle.", "level.")
+                 "radio.", "now.", "status.", "toggle.", "level.", "capture.")
 MENU_WIDTH_LIMIT = 42   # characters; the longest one today is 37 (es/fr), 33 in Portuguese
 
 
@@ -99,7 +99,8 @@ class PermissionTexts(unittest.TestCase):
     def test_every_language_has_its_lproj_with_both_texts(self):
         for lang in i18n.available_languages():
             strings = parse_strings(ROOT / "bundle" / f"{lang}.lproj" / "InfoPlist.strings")
-            self.assertEqual(sorted(strings), ["NSLocalNetworkUsageDescription", "NSMicrophoneUsageDescription"], lang)
+            self.assertEqual(sorted(strings), ["NSAudioCaptureUsageDescription", "NSLocalNetworkUsageDescription",
+                                               "NSMicrophoneUsageDescription"], lang)
             for key, text in strings.items():
                 self.assertGreater(len(text), 20, f"{lang}:{key}")
 
