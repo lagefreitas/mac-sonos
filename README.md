@@ -12,9 +12,10 @@ Capture uses PortAudio, not ffmpeg's avfoundation input: the latter drops chunks
 
 ## Use
 
-    .venv/bin/python mac_sonos.py list                      # find rooms
-    .venv/bin/python mac_sonos.py run Office --volume 15    # stream to one room
-    .venv/bin/python mac_sonos.py run Office "TV Room"      # grouped; first is leader
+    .venv/bin/python -m mac_sonos list                      # find rooms
+    .venv/bin/python -m mac_sonos run Office --volume 15    # stream to one room
+    .venv/bin/python -m mac_sonos run Office "TV Room"      # grouped; first is leader
+    .venv/bin/python -m mac_sonos run                       # rooms/volume/format from the saved config
 
 While running, the Mac output is switched to BlackHole and its volume set to 100% (output restored on Ctrl-C).
 Control volume on the Sonos, not the Mac: BlackHole uses the Mac volume as signal gain, so lowering it with
@@ -25,15 +26,24 @@ Options: `--format mp3|aac|flac|wav` (default mp3; aac/flac/wav are untested for
 
 ## Latency benchmark (experimental)
 
-    .venv/bin/python mac_sonos.py bench Office --runs 3
+    .venv/bin/python -m mac_sonos bench Office --runs 3
 
 Measures the time from Sonos connecting to reporting PLAYING for each format. Results were inconsistent
 (except mp3, ~6 s), so treat it as a rough probe, not a reliable latency measurement.
 
+## Layout and tests
+
+`mac_sonos/core` (capture, HTTP stream, session, Mac output), `mac_sonos/sonos` (discovery),
+`controller.py` (state and commands for any UI), `config.py`, `cli.py`. See `PLAN.md` for the roadmap.
+
+    .venv/bin/python -m unittest discover tests
+
+Settings live in `~/Library/Application Support/mac-sonos/config.json` (rooms, volume, format, device, port).
+
 ## Notes
 
 - Latency is 3-10 s (Sonos buffers radio streams). Fine for music, not for video or calls.
-- If ffmpeg can't open the device, check the name with `mac_sonos.py devices` and pass `--device`.
+- If the capture device is not found, check the name with `python -m mac_sonos devices` and pass `--device`.
 - Mac and Sonos must be on the same network; allow incoming connections for Python/ffmpeg if macOS asks.
 
 ## Run at login
