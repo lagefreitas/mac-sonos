@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mac Sonos — use old Sonos speakers as your Mac's speaker</title>
+<meta name="description" content="A menu bar app that streams your Mac's audio to Sonos speakers without AirPlay (Play:1, Playbar and others), plus a full Sonos control center in the menu bar.">
+<meta name="theme-color" content="#0b1020">
+<link rel="canonical" href="https://lagefreitas.github.io/mac-sonos/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Mac Sonos">
+<meta property="og:description" content="Use old Sonos speakers without AirPlay as your Mac's speaker, and control your whole Sonos from the menu bar.">
+<meta property="og:url" content="https://lagefreitas.github.io/mac-sonos/">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1020'/%3E%3Cpath d='M16 26h8l10-9v30l-10-9h-8z' fill='%23fff'/%3E%3Cpath d='M42 24c4 4 4 12 0 16M48 18c7 7 7 21 0 28' fill='none' stroke='%237aa7ff' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#ffffff; --bg2:#f4f6fa; --fg:#12161f; --muted:#55606f; --line:#dfe4ec; --card:#ffffff;
+  --accent:#1f5fe0; --accent-fg:#ffffff; --accent-soft:#e8efff; --code-bg:#0f1524; --code-fg:#e6ecff;
+  --warn-bg:#fff7e6; --warn-line:#f2d9a3; --shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.06);
+  --radius:14px; --maxw:1040px;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0b1020; --bg2:#10172a; --fg:#e8ecf5; --muted:#a2adc0; --line:#222c44; --card:#121a2f;
+    --accent:#7aa7ff; --accent-fg:#0b1020; --accent-soft:#17234a; --code-bg:#070b16; --code-fg:#dfe7ff;
+    --warn-bg:#2a2210; --warn-line:#5b4a1d; --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+a{color:var(--accent);text-underline-offset:3px}
+a:hover{text-decoration-thickness:2px}
+img,svg{max-width:100%}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+/* language switching: every translated block carries a lang attribute */
+html[data-lang="en"] [lang="pt"],html[data-lang="pt"] [lang="en"]{display:none!important}
+
+/* header */
+header.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
+header.top .wrap{display:flex;align-items:center;gap:18px;height:58px}
+.brand{font-weight:700;letter-spacing:-.01em;color:var(--fg);text-decoration:none;display:flex;align-items:center;gap:9px}
+.brand .logo{width:26px;height:26px}
+nav.links{margin-left:auto;display:flex;gap:4px;align-items:center}
+nav.links a.l{color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;font-size:15px}
+nav.links a.l:hover{color:var(--fg);background:var(--bg2)}
+.lang{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-left:6px}
+.lang button{all:unset;cursor:pointer;padding:5px 10px;font-size:13px;font-weight:600;color:var(--muted)}
+.lang button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg)}
+.lang button:focus-visible,.btn:focus-visible,.tab:focus-visible,summary:focus-visible,.copy:focus-visible,nav.links a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:760px){nav.links a.l{display:none}}
+
+/* hero */
+.hero{padding:72px 0 56px;background:radial-gradient(1200px 400px at 70% -10%,var(--accent-soft),transparent 70%)}
+.eyebrow{display:inline-block;font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+h1{font-size:clamp(2.1rem,5.2vw,3.6rem);line-height:1.08;letter-spacing:-.03em;margin:0 0 18px;max-width:18ch}
+.lead{font-size:clamp(1.05rem,2vw,1.28rem);color:var(--muted);max-width:60ch;margin:0 0 28px}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:11px;font-weight:600;text-decoration:none;border:1px solid var(--line);color:var(--fg);background:var(--card)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn:hover{filter:brightness(1.06)}
+.fine{font-size:14px;color:var(--muted);max-width:70ch}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:34px}
+.fact{padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.fact b{display:block;font-size:15px}
+.fact span{font-size:14px;color:var(--muted)}
+
+/* sections */
+section{padding:60px 0}
+section.alt{background:var(--bg2)}
+h2{font-size:clamp(1.6rem,3.2vw,2.2rem);letter-spacing:-.02em;margin:0 0 10px;line-height:1.15}
+.sub{color:var(--muted);max-width:68ch;margin:0 0 30px}
+h3{font-size:1.08rem;margin:0 0 6px;letter-spacing:-.005em}
+p{margin:0 0 12px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
+.card{padding:18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);box-shadow:var(--shadow)}
+.card p{margin:0;color:var(--muted);font-size:15px}
+.card .ic{font-size:22px;line-height:1;margin-bottom:10px}
+
+/* how it works */
+.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;counter-reset:s;margin:0 0 22px;padding:0;list-style:none}
+.flow li{position:relative;padding:16px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);counter-increment:s}
+.flow li::before{content:counter(s);display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-fg);font-size:13px;font-weight:700;margin-bottom:8px}
+.flow li b{display:block;font-size:15px;margin-bottom:2px}
+.flow li span{font-size:14px;color:var(--muted)}
+.flow li:not(:last-child)::after{content:"→";position:absolute;right:-13px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:18px;z-index:2}
+@media (max-width:900px){.flow{grid-template-columns:1fr;gap:20px}.flow li:not(:last-child)::after{content:"↓";right:auto;left:50%;top:auto;bottom:-22px;transform:translateX(-50%)}}
+.note{padding:14px 16px;border:1px solid var(--warn-line);background:var(--warn-bg);border-radius:12px;font-size:15px}
+.two{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:22px}
+.two .card h3 small{font-weight:500;color:var(--muted)}
+ul.tight{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:15px}
+ul.tight li{margin:3px 0}
+
+/* menu tour */
+.tour{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:28px;align-items:start}
+@media (max-width:860px){.tour{grid-template-columns:1fr}}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tab{all:unset;cursor:pointer;padding:6px 12px;border:1px solid var(--line);border-radius:999px;font-size:13px;font-weight:600;color:var(--muted);background:var(--card)}
+.tab[aria-selected="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.menubar{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:6px 14px;border-radius:10px 10px 0 0;background:#1d2233;color:#e8ecf5;font-size:14px}
+.menubar .item{padding:2px 8px;border-radius:6px;background:rgba(255,255,255,.14)}
+.menu{border:1px solid var(--line);border-top:0;border-radius:0 0 12px 12px;background:var(--card);box-shadow:var(--shadow);padding:6px;font-size:14.5px;max-height:620px;overflow:auto}
+.menu ul{list-style:none;margin:0;padding:0}
+.menu li{margin:0}
+.menu .row{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;min-height:28px}
+.menu .check{width:14px;color:var(--accent);font-weight:700;flex:none}
+.menu details>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;min-height:28px}
+.menu details>summary::-webkit-details-marker{display:none}
+.menu details>summary::after{content:"›";margin-left:auto;color:var(--muted);font-size:17px;transition:transform .15s}
+.menu details[open]>summary::after{transform:rotate(90deg)}
+.menu details>summary:hover{background:var(--accent-soft)}
+.menu details>ul{margin:2px 0 4px 16px;padding-left:8px;border-left:2px solid var(--line)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:5px 6px}
+.tourtext p{color:var(--muted)}
+.tourtext ul{padding-left:20px;margin:8px 0 14px;color:var(--muted)}
+.tourtext li{margin:5px 0}
+.tourtext li b{color:var(--fg)}
+.caption{font-size:13.5px;color:var(--muted);margin-top:10px}
+
+/* install */
+.steps{counter-reset:st;list-style:none;padding:0;margin:0 0 8px}
+.steps>li{counter-increment:st;position:relative;padding:0 0 22px 46px}
+.steps>li::before{content:counter(st);position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-fg);display:grid;place-items:center;font-weight:700;font-size:14px}
+.steps>li:not(:last-child)::after{content:"";position:absolute;left:14px;top:34px;bottom:4px;width:2px;background:var(--line)}
+pre{position:relative;margin:8px 0 0;padding:14px 64px 14px 16px;background:var(--code-bg);color:var(--code-fg);border-radius:11px;overflow:auto;font:13.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+code{font:0.92em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--bg2);padding:1px 6px;border-radius:6px}
+pre code{background:none;padding:0;font-size:inherit;color:inherit}
+.copy{all:unset;cursor:pointer;position:absolute;top:8px;right:8px;font-size:12px;font-weight:600;padding:4px 9px;border-radius:7px;background:rgba(255,255,255,.12);color:#cdd8ff}
+.copy:hover{background:rgba(255,255,255,.22)}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);margin-top:6px}
+.tablewrap tr:last-child td{border-bottom:0}
+
+footer{padding:40px 0 60px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+footer .cols{display:grid;gap:22px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+footer h4{margin:0 0 8px;color:var(--fg);font-size:14px}
+footer ul{list-style:none;padding:0;margin:0}
+footer li{margin:4px 0}
+.disclaimer{margin-top:28px;font-size:13px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Mac Sonos">
+      <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#0b1020"/><path d="M16 26h8l10-9v30l-10-9h-8z" fill="#fff"/><path d="M42 24c4 4 4 12 0 16M48 18c7 7 7 21 0 28" fill="none" stroke="#7aa7ff" stroke-width="4" stroke-linecap="round"/></svg>
+      Mac Sonos
+    </a>
+    <nav class="links" aria-label="Main">
+      <a class="l" href="#features"><span lang="en">Features</span><span lang="pt">Recursos</span></a>
+      <a class="l" href="#how"><span lang="en">How it works</span><span lang="pt">Como funciona</span></a>
+      <a class="l" href="#tour"><span lang="en">Menu tour</span><span lang="pt">Tour do menu</span></a>
+      <a class="l" href="#install"><span lang="en">Install</span><span lang="pt">Instalar</span></a>
+      <a class="l" href="https://github.com/lagefreitas/mac-sonos">GitHub</a>
+      <span class="lang" role="group" aria-label="Language">
+        <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-set-lang="pt" aria-pressed="false">PT</button>
+      </span>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="wrap">
+    <span class="eyebrow"><span lang="en">macOS menu bar app</span><span lang="pt">App de barra de menus do macOS</span></span>
+    <h1><span lang="en">Use your old Sonos as your Mac's speaker.</span><span lang="pt">Use seu Sonos antigo como alto-falante do Mac.</span></h1>
+    <p class="lead">
+      <span lang="en">Mac Sonos streams your Mac's audio to Sonos speakers that don't support AirPlay (Play:1, the first Playbar and friends), and puts a full Sonos control center one click away in the menu bar.</span>
+      <span lang="pt">O Mac Sonos transmite o áudio do Mac para Sonos sem AirPlay (Play:1, a primeira Playbar e companhia) e coloca um centro de controle Sonos completo a um clique, na barra de menus.</span>
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#install"><span lang="en">Get started</span><span lang="pt">Começar</span></a>
+      <a class="btn" href="https://github.com/lagefreitas/mac-sonos"><svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span lang="en">View on GitHub</span><span lang="pt">Ver no GitHub</span></a>
+    </div>
+    <p class="fine">
+      <span lang="en">Unofficial project. It talks to your speakers over your local network: no Sonos account, no cloud API, no analytics.</span>
+      <span lang="pt">Projeto não oficial. Fala com os alto-falantes pela sua rede local: sem conta Sonos, sem API em nuvem, sem telemetria.</span>
+    </p>
+    <div class="facts">
+      <div class="fact"><b>Play:1 · Playbar</b><span lang="en">Built and tested on S2 speakers that have no AirPlay.</span><span lang="pt">Feito e testado em alto-falantes S2 sem AirPlay.</span></div>
+      <div class="fact"><b lang="en">4 languages</b><b lang="pt">4 idiomas</b><span lang="en">English, Español, Français, Português; follows your Mac.</span><span lang="pt">English, Español, Français, Português; segue o seu Mac.</span></div>
+      <div class="fact"><b lang="en">Two capture modes</b><b lang="pt">Dois modos de captura</b><span lang="en">System audio (no extra software) or BlackHole.</span><span lang="pt">Áudio do sistema (sem software extra) ou BlackHole.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="why" class="alt">
+  <div class="wrap">
+    <h2><span lang="en">Why this exists</span><span lang="pt">Por que isso existe</span></h2>
+    <p class="sub">
+      <span lang="en">Older Sonos speakers such as the Play:1 and the first Playbar can't receive AirPlay, so macOS has no way to send sound to them. The Sonos app doesn't help either: it plays from music services, not from your Mac. Mac Sonos fills the gap by listening to what your Mac plays and serving it on your network as a radio stream that Sonos knows how to play. Pick the rooms, set the volume, and your Mac has speakers again.</span>
+      <span lang="pt">Sonos antigos, como a Play:1 e a primeira Playbar, não recebem AirPlay, então o macOS não tem como enviar som para eles. O app da Sonos também não resolve: ele toca de serviços de música, não do seu Mac. O Mac Sonos preenche essa lacuna: escuta o que o Mac toca e serve isso na sua rede como uma rádio que o Sonos sabe tocar. Escolha os cômodos, ajuste o volume, e o Mac volta a ter caixas de som.</span>
+    </p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2><span lang="en">How it works</span><span lang="pt">Como funciona</span></h2>
+    <p class="sub"><span lang="en">Five small steps, all on your own machine and network.</span><span lang="pt">Cinco passos pequenos, todos na sua máquina e na sua rede.</span></p>
+    <ol class="flow">
+      <li><b lang="en">Your Mac plays</b><b lang="pt">O Mac toca</b><span lang="en">Any app: music, a browser, a game.</span><span lang="pt">Qualquer app: música, navegador, jogo.</span></li>
+      <li><b lang="en">Captured</b><b lang="pt">Capturado</b><span lang="en">By a system audio tap, or through BlackHole.</span><span lang="pt">Por um tap de áudio do sistema, ou pelo BlackHole.</span></li>
+      <li><b lang="en">Encoded</b><b lang="pt">Codificado</b><span lang="en">ffmpeg turns it into an MP3 or AAC stream.</span><span lang="pt">O ffmpeg transforma em um stream MP3 ou AAC.</span></li>
+      <li><b lang="en">Served</b><b lang="pt">Servido</b><span lang="en">A tiny HTTP server on your Mac, on your LAN.</span><span lang="pt">Um servidor HTTP minúsculo no Mac, na sua LAN.</span></li>
+      <li><b lang="en">Played</b><b lang="pt">Tocado</b><span lang="en">Sonos fetches it like any internet radio.</span><span lang="pt">O Sonos busca como qualquer rádio da internet.</span></li>
+    </ol>
+    <div class="note">
+      <span lang="en"><b>About the delay.</b> Sonos buffers radio streams before playing them, so expect roughly 3–10 seconds of delay. That is fine for music and podcasts, but not for video or calls.</span>
+      <span lang="pt"><b>Sobre o atraso.</b> O Sonos guarda um buffer dos streams de rádio antes de tocar, então espere de 3 a 10 segundos de atraso. Serve para música e podcasts, mas não para vídeo ou chamadas.</span>
+    </div>
+    <div class="two">
+      <div class="card">
+        <h3><span lang="en">System audio</span><span lang="pt">Áudio do sistema</span> <small>· macOS 14.2+</small></h3>
+        <p lang="en">A Core Audio process tap listens to what the Mac plays. Nothing is installed, your Mac's output is left alone, and the Mac's volume doesn't matter. Optionally the Mac stays silent while it streams.</p>
+        <p lang="pt">Um tap de processo do Core Audio escuta o que o Mac toca. Nada para instalar, a saída do Mac fica intocada e o volume do Mac não importa. Opcionalmente, o Mac fica em silêncio enquanto transmite.</p>
+        <ul class="tight">
+          <li lang="en">Needs the System Audio Recording permission</li><li lang="pt">Precisa da permissão de Gravação de Áudio do Sistema</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>BlackHole</h3>
+        <p lang="en">The original route: the Mac's output is switched to the free BlackHole virtual device and read like a microphone. It works on more setups but is a little fussier.</p>
+        <p lang="pt">O caminho original: a saída do Mac vai para o dispositivo virtual gratuito BlackHole e é lida como um microfone. Funciona em mais cenários, mas é um pouco mais chato.</p>
+        <ul class="tight">
+          <li lang="en">The Mac's volume is the signal level: keep it at 100%</li><li lang="pt">O volume do Mac é o nível do sinal: deixe em 100%</li>
+          <li lang="en">macOS shows its microphone indicator</li><li lang="pt">O macOS mostra o indicador de microfone</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features" class="alt">
+  <div class="wrap">
+    <h2><span lang="en">More than a speaker driver</span><span lang="pt">Mais que um driver de caixa de som</span></h2>
+    <p class="sub"><span lang="en">The menu bar app is also a compact Sonos remote for the whole house, built on the local Sonos API, so it does things the official app doesn't.</span><span lang="pt">O app de barra de menus também é um controle Sonos compacto para a casa toda, feito sobre a API local da Sonos, e por isso faz coisas que o app oficial não faz.</span></p>
+    <div class="grid">
+      <div class="card"><div class="ic">🔊</div><h3 lang="en">Stream to any rooms</h3><h3 lang="pt">Transmita para os cômodos</h3><p lang="en">One room or several grouped, with volume steps that change live, MP3 or AAC, and automatic recovery after Wi-Fi hiccups.</p><p lang="pt">Um cômodo ou vários agrupados, com passos de volume que mudam ao vivo, MP3 ou AAC e recuperação automática depois de falhas do Wi-Fi.</p></div>
+      <div class="card"><div class="ic">🎵</div><h3 lang="en">Now playing, everywhere</h3><h3 lang="pt">Tocando agora, em todo lugar</h3><p lang="en">Every group that is playing, with cover art, position, and only the controls it really supports. Optionally show the track next to the icon.</p><p lang="pt">Cada grupo que está tocando, com capa, posição e só os controles que ele realmente suporta. Opcionalmente, mostra a faixa ao lado do ícone.</p></div>
+      <div class="card"><div class="ic">🏠</div><h3 lang="en">The whole house</h3><h3 lang="pt">A casa toda</h3><p lang="en">Per-room volume and mute, join and leave groups, party mode, and a "split all" button. Stereo pairs are handled correctly.</p><p lang="pt">Volume e mudo por cômodo, entrar e sair de grupos, modo festa e um botão "separar todos". Pares estéreo são tratados corretamente.</p></div>
+      <div class="card"><div class="ic">🎚️</div><h3 lang="en">Sound controls</h3><h3 lang="pt">Controles de som</h3><p lang="en">Bass, treble and loudness for every room; night mode, speech enhancement, surround and TV audio on soundbars. Only what each speaker supports is shown.</p><p lang="pt">Graves, agudos e loudness em todos os cômodos; modo noite, realce de diálogo, surround e áudio da TV nas soundbars. Só aparece o que cada aparelho suporta.</p></div>
+      <div class="card"><div class="ic">⭐</div><h3 lang="en">Favorites, playlists, queue</h3><h3 lang="pt">Favoritos, playlists, fila</h3><p lang="en">Play your Sonos favorites and playlists, manage the queue, and keep a list of your own radio stream URLs.</p><p lang="pt">Toque seus favoritos e playlists do Sonos, gerencie a fila e guarde uma lista de URLs de rádio própria.</p></div>
+      <div class="card"><div class="ic">⏰</div><h3 lang="en">Sleep timer and alarms</h3><h3 lang="pt">Soneca e alarmes</h3><p lang="en">A sleep timer per group (for the Mac's stream it fades the volume out and stops cleanly) and full alarm management.</p><p lang="pt">Soneca por grupo (no stream do Mac, o volume faz fade e para sem corte) e gerenciamento completo de alarmes.</p></div>
+      <div class="card"><div class="ic">🎬</div><h3 lang="en">Scenes</h3><h3 lang="pt">Cenas</h3><p lang="en">Save the state of your house (grouping, volumes, sound settings, the Mac stream) and bring it back in one click. Scenes are plain JSON you can edit.</p><p lang="pt">Salve o estado da casa (agrupamento, volumes, som, o stream do Mac) e traga de volta com um clique. As cenas são JSON simples, editáveis.</p></div>
+      <div class="card"><div class="ic">⌨️</div><h3 lang="en">Media keys</h3><h3 lang="pt">Teclas de mídia</h3><p lang="en">Optional: while the Mac streams, the volume keys drive the Sonos, and play/next/previous follow what is playing there.</p><p lang="pt">Opcional: enquanto o Mac transmite, as teclas de volume controlam o Sonos, e play/próxima/anterior seguem o que está tocando lá.</p></div>
+      <div class="card"><div class="ic">🌐</div><h3 lang="en">Your language</h3><h3 lang="pt">No seu idioma</h3><p lang="en">English, Español, Français and Português, following your Mac's language or chosen from the menu.</p><p lang="pt">English, Español, Français e Português, seguindo o idioma do Mac ou escolhido no menu.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="tour">
+  <div class="wrap">
+    <h2><span lang="en">A tour of the menu</span><span lang="pt">Um tour pelo menu</span></h2>
+    <p class="sub"><span lang="en">This is the menu itself, rendered by the app with made-up rooms and songs, in every language it speaks. Click the submenus.</span><span lang="pt">Este é o próprio menu, gerado pelo app com cômodos e músicas inventados, em cada idioma que ele fala. Clique nos submenus.</span></p>
+    <div class="tour">
+      <div>
+        <div class="tabs" role="tablist" aria-label="Menu language" id="tourtabs"></div>
+        <div class="menubar" aria-hidden="true"><span class="item" id="tourIcon">🔊</span><span>Mon 9:41</span></div>
+        <div class="menu" id="tourmenu"></div>
+        <p class="caption"><span lang="en">Generated from the real app by <code>tools/build_site.py</code>, not drawn by hand.</span><span lang="pt">Gerado a partir do app real por <code>tools/build_site.py</code>, não desenhado à mão.</span></p>
+      </div>
+      <div class="tourtext">
+        <p lang="en">Everything sits behind one icon. The icon shows the state (stopped, connecting, streaming, interrupted, error), and the menu keeps what you do most at the top.</p>
+        <p lang="pt">Tudo fica atrás de um único ícone. Ele mostra o estado (parado, conectando, transmitindo, interrompido, erro), e o menu deixa no topo o que você mais faz.</p>
+        <ul lang="en">
+          <li><b>Now playing</b> lists every playing group with its controls and a sleep timer.</li>
+          <li><b>Home</b> has every room: volume, mute, join or leave a group, and a Sound submenu.</li>
+          <li><b>Library</b> picks where things play, then favorites, playlists, queue and radio URLs.</li>
+          <li><b>Capture</b> switches between system audio and BlackHole.</li>
+        </ul>
+        <ul lang="pt">
+          <li><b>Agora tocando</b> lista cada grupo que toca, com seus controles e uma soneca.</li>
+          <li><b>Casa</b> tem todos os cômodos: volume, mudo, entrar ou sair de um grupo e um submenu de Som.</li>
+          <li><b>Biblioteca</b> escolhe onde as coisas tocam e abre favoritos, playlists, fila e URLs de rádio.</li>
+          <li><b>Captura</b> alterna entre áudio do sistema e BlackHole.</li>
+        </ul>
+        <p lang="en">If something stops the stream from outside (someone uses the Sonos app, for example), the icon turns ⏸ and one click brings it back.</p>
+        <p lang="pt">Se algo para o stream por fora (alguém usa o app da Sonos, por exemplo), o ícone vira ⏸ e um clique o traz de volta.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="alt">
+  <div class="wrap">
+    <h2><span lang="en">Install</span><span lang="pt">Instalar</span></h2>
+    <p class="sub">
+      <span lang="en">It is built from source on your Mac. You need macOS 13 or later (14.2+ for the system audio mode), <a href="https://brew.sh">Homebrew</a>, and Python 3. Developed and tested on macOS 27 with an Apple silicon Mac.</span>
+      <span lang="pt">Ele é compilado a partir do código-fonte no seu Mac. Você precisa de macOS 13 ou mais novo (14.2+ para o modo de áudio do sistema), do <a href="https://brew.sh">Homebrew</a> e do Python 3. Desenvolvido e testado no macOS 27, em um Mac com Apple silicon.</span>
+    </p>
+    <ol class="steps">
+      <li>
+        <h3 lang="en">Get the code</h3><h3 lang="pt">Baixe o código</h3>
+        <pre><code>git clone https://github.com/lagefreitas/mac-sonos.git
+cd mac-sonos</code><button class="copy" type="button" data-copy>Copy</button></pre>
+      </li>
+      <li>
+        <h3 lang="en">Install the tools</h3><h3 lang="pt">Instale as ferramentas</h3>
+        <p lang="en">This installs ffmpeg, BlackHole and SwitchAudioSource with Homebrew and creates a Python environment. BlackHole is only needed for the BlackHole mode; if it asks you to, restart or run <code>sudo killall coreaudiod</code>.</p>
+        <p lang="pt">Isso instala ffmpeg, BlackHole e SwitchAudioSource pelo Homebrew e cria um ambiente Python. O BlackHole só é necessário no modo BlackHole; se ele pedir, reinicie ou rode <code>sudo killall coreaudiod</code>.</p>
+        <pre><code>./setup.sh</code><button class="copy" type="button" data-copy>Copy</button></pre>
+      </li>
+      <li>
+        <h3 lang="en">Build the app</h3><h3 lang="pt">Compile o app</h3>
+        <p lang="en">This makes <code>~/Applications/Mac Sonos.app</code>, signed with a local certificate so macOS remembers the permissions you grant it.</p>
+        <p lang="pt">Isso cria o <code>~/Applications/Mac Sonos.app</code>, assinado com um certificado local para o macOS lembrar das permissões que você conceder.</p>
+        <pre><code>./build-app.sh
+open ~/Applications/"Mac Sonos.app"</code><button class="copy" type="button" data-copy>Copy</button></pre>
+      </li>
+      <li>
+        <h3 lang="en">Allow what it asks for</h3><h3 lang="pt">Permita o que ele pedir</h3>
+        <p lang="en">macOS asks the first time each thing is needed. Pick your rooms in the menu, choose a capture mode, and turn on <b>Open at login</b> if you like.</p>
+        <p lang="pt">O macOS pergunta na primeira vez que cada coisa é necessária. Escolha os cômodos no menu, o modo de captura e ative <b>Abrir no login</b> se quiser.</p>
+      </li>
+    </ol>
+
+    <h3 style="margin-top:8px"><span lang="en">Permissions</span><span lang="pt">Permissões</span></h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th><span lang="en">Permission</span><span lang="pt">Permissão</span></th><th><span lang="en">Why</span><span lang="pt">Para quê</span></th><th><span lang="en">When</span><span lang="pt">Quando</span></th></tr></thead>
+      <tbody>
+        <tr><td><b>Local Network</b></td><td><span lang="en">Find your speakers and stream to them</span><span lang="pt">Achar os alto-falantes e transmitir para eles</span></td><td><span lang="en">Always</span><span lang="pt">Sempre</span></td></tr>
+        <tr><td><b>System Audio Recording</b></td><td><span lang="en">Listen to what the Mac plays</span><span lang="pt">Escutar o que o Mac toca</span></td><td><span lang="en">System audio mode</span><span lang="pt">Modo áudio do sistema</span></td></tr>
+        <tr><td><b>Microphone</b></td><td><span lang="en">Read the BlackHole device</span><span lang="pt">Ler o dispositivo BlackHole</span></td><td><span lang="en">BlackHole mode</span><span lang="pt">Modo BlackHole</span></td></tr>
+        <tr><td><b>Accessibility</b></td><td><span lang="en">Capture the media and volume keys</span><span lang="pt">Capturar as teclas de mídia e de volume</span></td><td><span lang="en">Optional: media keys</span><span lang="pt">Opcional: teclas de mídia</span></td></tr>
+      </tbody>
+    </table></div>
+    <p class="caption">
+      <span lang="en">The System Audio Recording permission is requested through a private macOS interface (there is no public one). If a future macOS changes that, add "Mac Sonos" by hand in System Settings › Privacy &amp; Security › Screen &amp; System Audio Recording.</span>
+      <span lang="pt">A permissão de Gravação de Áudio do Sistema é pedida por uma interface privada do macOS (não existe uma pública). Se um macOS futuro mudar isso, adicione o "Mac Sonos" à mão em Ajustes do Sistema › Privacidade e Segurança › Gravação de Tela e Áudio do Sistema.</span>
+    </p>
+
+    <h3 style="margin-top:28px"><span lang="en">Prefer the terminal?</span><span lang="pt">Prefere o terminal?</span></h3>
+    <pre lang="en"><code>.venv/bin/python -m mac_sonos list                           # find your rooms
+.venv/bin/python -m mac_sonos run "Living Room" --volume 15  # stream to one room
+.venv/bin/python -m mac_sonos run                            # use the saved settings</code><button class="copy" type="button" data-copy>Copy</button></pre>
+    <pre lang="pt"><code>.venv/bin/python -m mac_sonos list                           # lista os cômodos
+.venv/bin/python -m mac_sonos run "Living Room" --volume 15  # transmite para um cômodo
+.venv/bin/python -m mac_sonos run                            # usa as configurações salvas</code><button class="copy" type="button" data-copy>Copiar</button></pre>
+  </div>
+</section>
+
+<section id="notes">
+  <div class="wrap">
+    <h2><span lang="en">Good to know</span><span lang="pt">Bom saber</span></h2>
+    <div class="grid">
+      <div class="card"><h3 lang="en">Delay</h3><h3 lang="pt">Atraso</h3><p lang="en">Streams arrive a few seconds late because Sonos buffers radio. Music and podcasts are fine; video and calls are not.</p><p lang="pt">Os streams chegam alguns segundos atrasados porque o Sonos faz buffer de rádio. Música e podcasts vão bem; vídeo e chamadas, não.</p></div>
+      <div class="card"><h3 lang="en">What was tested</h3><h3 lang="pt">O que foi testado</h3><p lang="en">Play:1 speakers (including a stereo pair) and a Playbar on S2, from an Apple silicon Mac on macOS 27. Other models should work through the same local API, but they haven't been tried.</p><p lang="pt">Alto-falantes Play:1 (inclusive um par estéreo) e uma Playbar no S2, a partir de um Mac com Apple silicon no macOS 27. Outros modelos devem funcionar pela mesma API local, mas não foram testados.</p></div>
+      <div class="card"><h3 lang="en">Privacy</h3><h3 lang="pt">Privacidade</h3><p lang="en">Audio goes from your Mac to your speakers over your LAN. There is no account, no telemetry and no server of ours. Cover art is fetched from the address Sonos reports.</p><p lang="pt">O áudio vai do seu Mac aos alto-falantes pela sua LAN. Não há conta, telemetria nem servidor nosso. As capas vêm do endereço que o Sonos informa.</p></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <h4>Mac Sonos</h4>
+        <ul>
+          <li><a href="https://github.com/lagefreitas/mac-sonos">GitHub</a></li>
+          <li><a href="https://github.com/lagefreitas/mac-sonos#readme"><span lang="en">Full documentation (README)</span><span lang="pt">Documentação completa (README)</span></a></li>
+          <li><a href="https://github.com/lagefreitas/mac-sonos/issues"><span lang="en">Report an issue</span><span lang="pt">Reportar um problema</span></a></li>
+        </ul>
+      </div>
+      <div>
+        <h4><span lang="en">Built with</span><span lang="pt">Feito com</span></h4>
+        <ul>
+          <li><a href="https://github.com/SoCo/SoCo">SoCo</a> — Sonos</li>
+          <li><a href="https://existential.audio/blackhole/">BlackHole</a></li>
+          <li><a href="https://ffmpeg.org/">ffmpeg</a>, <a href="https://github.com/jaredks/rumps">rumps</a>, <a href="https://pyobjc.readthedocs.io/">PyObjC</a>, <a href="https://py2app.readthedocs.io/">py2app</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="disclaimer">
+      <span lang="en">Mac Sonos is an independent project. It is not affiliated with, endorsed by, or sponsored by Sonos, Inc. Sonos, Play:1 and Playbar are trademarks of Sonos, Inc.; AirPlay and macOS are trademarks of Apple Inc.</span>
+      <span lang="pt">O Mac Sonos é um projeto independente. Não é afiliado, endossado nem patrocinado pela Sonos, Inc. Sonos, Play:1 e Playbar são marcas da Sonos, Inc.; AirPlay e macOS são marcas da Apple Inc.</span>
+    </p>
+  </div>
+</footer>
+
+<script>
+const MENUS = __MENUS__;
+const LANG_NAMES = {en: "English", es: "Español", fr: "Français", pt: "Português"};
+
+/* page language: the saved choice, else the browser's, else English */
+(function () {
+  const root = document.documentElement;
+  const stored = (function () { try { return localStorage.getItem("lang"); } catch (e) { return null; } })();
+  const wanted = stored || ((navigator.language || "en").toLowerCase().indexOf("pt") === 0 ? "pt" : "en");
+  function setLang(lang) {
+    root.setAttribute("data-lang", lang);
+    root.lang = lang;
+    document.title = lang === "pt" ? "Mac Sonos — use Sonos antigos como alto-falante do Mac" : "Mac Sonos — use old Sonos speakers as your Mac's speaker";
+    document.querySelectorAll("[data-set-lang]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.setLang === lang)); });
+    document.querySelectorAll("[data-copy]").forEach(function (b) { b.textContent = lang === "pt" ? "Copiar" : "Copy"; });
+    try { localStorage.setItem("lang", lang); } catch (e) {}
+  }
+  document.querySelectorAll("[data-set-lang]").forEach(function (b) { b.addEventListener("click", function () { setLang(b.dataset.setLang); }); });
+  setLang(wanted === "pt" ? "pt" : "en");
+})();
+
+/* copy buttons */
+document.querySelectorAll("[data-copy]").forEach(function (btn) {
+  btn.addEventListener("click", async function () {
+    const text = btn.parentElement.querySelector("code").innerText;
+    const pt = document.documentElement.dataset.lang === "pt";
+    try { await navigator.clipboard.writeText(text); btn.textContent = pt ? "Copiado" : "Copied"; } catch (e) { btn.textContent = "—"; }
+    setTimeout(function () { btn.textContent = pt ? "Copiar" : "Copy"; }, 1400);
+  });
+});
+
+/* menu tour: the app's real menu tree, in the chosen menu language */
+(function () {
+  const tabs = document.getElementById("tourtabs");
+  const menu = document.getElementById("tourmenu");
+  const icon = document.getElementById("tourIcon");
+
+  function row(node) {
+    const li = document.createElement("li");
+    if (node.separator) { li.appendChild(document.createElement("hr")); return li; }
+    const label = document.createElement("span");
+    label.textContent = node.title;
+    const check = document.createElement("span");
+    check.className = "check";
+    check.textContent = node.checked ? "✓" : "";
+    if (node.children && node.children.length) {
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.append(check, label);
+      const ul = document.createElement("ul");
+      node.children.forEach(function (child) { ul.appendChild(row(child)); });
+      details.append(summary, ul);
+      li.appendChild(details);
+    } else {
+      const div = document.createElement("div");
+      div.className = "row";
+      div.append(check, label);
+      li.appendChild(div);
+    }
+    return li;
+  }
+
+  function show(lang) {
+    tabs.querySelectorAll(".tab").forEach(function (t) { t.setAttribute("aria-selected", String(t.dataset.lang === lang)); });
+    const ul = document.createElement("ul");
+    MENUS[lang].items.forEach(function (n) { ul.appendChild(row(n)); });
+    menu.replaceChildren(ul);
+    icon.textContent = MENUS[lang].icon;
+  }
+
+  Object.keys(MENUS).forEach(function (lang) {
+    const b = document.createElement("button");
+    b.className = "tab"; b.type = "button"; b.setAttribute("role", "tab"); b.dataset.lang = lang;
+    b.textContent = LANG_NAMES[lang] || lang;
+    b.addEventListener("click", function () { show(lang); });
+    tabs.appendChild(b);
+  });
+  show("en");
+})();
+</script>
+</body>
+</html>

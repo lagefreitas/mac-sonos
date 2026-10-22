@@ -1,10 +1,12 @@
 # mac-sonos
 
-Use old Sonos speakers (Play:1, Playbar, no AirPlay) as the Mac's speaker.
+Use old Sonos speakers (Play:1, Playbar, no AirPlay) as the Mac's speaker, and control the whole Sonos from the menu bar.
 
-Mac output -> BlackHole -> PortAudio capture (sounddevice) -> ffmpeg (MP3) -> HTTP stream on the LAN -> Sonos plays it as a radio stream.
+**Site: https://lagefreitas.github.io/mac-sonos/** (what it is, a tour of the menu, install steps; English and Portuguese).
 
-Capture uses PortAudio, not ffmpeg's avfoundation input: the latter drops chunks of audio from BlackHole (vinyl-like crackle).
+Mac audio -> capture (a Core Audio system audio tap, or the BlackHole virtual device) -> ffmpeg (MP3/AAC) -> HTTP stream on the LAN -> Sonos plays it as a radio stream. See "Where the audio comes from" below for the two capture sources.
+
+The BlackHole capture reads through PortAudio, not ffmpeg's avfoundation input: the latter drops chunks of audio from BlackHole (vinyl-like crackle).
 
 ## Setup
 
@@ -147,6 +149,13 @@ The tests check that the new catalog has the same keys and placeholders as `pt.j
 by accident (values equal to Portuguese must be listed on purpose in `tests/test_translations.py`), that menu entries
 stay narrow, that no raw key or `{placeholder}` reaches any menu in any language, and that no UI text is hard-coded.
 Lookup falls back to English, then Portuguese; a missing key shows the key and is logged once.
+
+## The site (GitHub Pages)
+
+`docs/` is the site, served by GitHub Pages from the `main` branch. `docs/index.html` is generated: edit
+`tools/site/template.html` and run `.venv/bin/python tools/build_site.py`. The menu tour on the page is the real menu of
+the app, rendered headless with made-up rooms in every language, so it changes when the menu changes; a test fails if
+the committed page is out of date.
 
 ## Notes
 
