@@ -2,7 +2,9 @@
 
 Use old Sonos speakers (Play:1, Playbar, no AirPlay) as the Mac's speaker.
 
-Mac output -> BlackHole -> ffmpeg (MP3) -> HTTP stream on the LAN -> Sonos plays it as a radio stream.
+Mac output -> BlackHole -> PortAudio capture (sounddevice) -> ffmpeg (MP3) -> HTTP stream on the LAN -> Sonos plays it as a radio stream.
+
+Capture uses PortAudio, not ffmpeg's avfoundation input: the latter drops chunks of audio from BlackHole (vinyl-like crackle).
 
 ## Setup
 

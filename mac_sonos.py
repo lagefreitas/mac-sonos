@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Stream the Mac's audio to Sonos speakers that lack AirPlay (Play:1, Playbar...).
 
-Mac output -> BlackHole (virtual device) -> ffmpeg -> HTTP stream -> Sonos.
-Each Sonos connection gets its own ffmpeg, so a stream always starts at the live edge.
+Mac output -> BlackHole (virtual device) -> PortAudio capture -> ffmpeg encoder -> HTTP stream -> Sonos.
+Each Sonos connection gets its own capture and ffmpeg, so a stream always starts at the live edge.
+(ffmpeg's own avfoundation capture drops chunks of audio, which sounds like vinyl crackle.)
 """
 import argparse
+import os
+import queue
 import shutil
 import socket
 import subprocess
@@ -14,6 +17,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import soco
+import sounddevice as sd
 
 # name -> (ffmpeg codec args, content type, default bitrate, play as mp3 radio)
 FORMATS = {
@@ -34,12 +38,15 @@ DIDL = (
 )
 
 
+RATE = 48000  # BlackHole's native rate
+
+
 def ffmpeg_cmd(cfg):
     codec, _, default_br, _ = FORMATS[cfg["fmt"]]
     cmd = ["ffmpeg", "-loglevel", "error"]
     if cfg["lowlat"]:
         cmd += ["-fflags", "+nobuffer", "-flags", "+low_delay", "-probesize", "32"]
-    cmd += ["-f", "avfoundation", "-i", f":{cfg['device']}", "-ac", "2", "-ar", "44100"]
+    cmd += ["-f", "s16le", "-ar", str(RATE), "-ac", "2", "-i", "pipe:0", "-ar", "44100"]
     bitrate = cfg["bitrate"] or default_br
     if bitrate:
         cmd += ["-b:a", bitrate]
@@ -50,17 +57,38 @@ class StreamHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         cfg = self.server.cfg
         self.server.gets.append(time.time())
-        ff = subprocess.Popen(ffmpeg_cmd(cfg), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        pcm = queue.Queue(maxsize=500)
+
+        def on_audio(indata, frames, t, status):
+            try:
+                pcm.put_nowait(bytes(indata))
+            except queue.Full:
+                pass
+
+        ff = subprocess.Popen(ffmpeg_cmd(cfg), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL)
+
+        def feed():
+            try:
+                while (block := pcm.get()) is not None:
+                    ff.stdin.write(block)
+            except (BrokenPipeError, ValueError, OSError):
+                pass
+
+        threading.Thread(target=feed, daemon=True).start()
         try:
-            self.send_response(200)
-            self.send_header("Content-Type", FORMATS[cfg["fmt"]][1])
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            while chunk := ff.stdout.read1(4096):
-                self.wfile.write(chunk)
+            with sd.RawInputStream(device=cfg["device"], samplerate=RATE, channels=2, dtype="int16",
+                                   latency=0.1, callback=on_audio):
+                self.send_response(200)
+                self.send_header("Content-Type", FORMATS[cfg["fmt"]][1])
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                while chunk := ff.stdout.read1(4096):
+                    self.wfile.write(chunk)
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
+            pcm.put(None)
             ff.kill()
 
     def log_message(self, *args):
@@ -237,6 +265,8 @@ def cmd_bench(args):
 
 
 def main():
+    # Children (ffmpeg...) inherit stdin; if it is a tty, a background job gets stopped (SIGTTIN).
+    os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list", help="list Sonos rooms").set_defaults(fn=cmd_list)
