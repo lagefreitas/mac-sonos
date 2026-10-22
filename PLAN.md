@@ -168,6 +168,13 @@ Hoje todos os textos da UI estão em português, espalhados em `ui/menubar.py` e
   traduzir en/es/fr no fim. Cada sprint seguinte já nasce usando `t()`.
 - Risco: o menu muda de largura com o idioma (es/fr são mais longos); revisar textos de barra e abreviações.
 
+## Licença (decidido em 2026-10-22): MIT
+Escolha de baixo arrependimento para um projeto de nicho (público pequeno, marca "Sonos" de terceiro, dependência de
+API privada do macOS, custo de suporte). Monetizar fica possível por serviços e por um pacote pronto, assinado e
+notarizado, mas outros também poderão vender builds; um eventual produto pago pediria outro nome (a marca "Sonos" é da
+Sonos, Inc.) e Apple Developer ID. ffmpeg (GPL) e BlackHole não são empacotados: se forem, a GPL passa a valer para o que
+for distribuído. Uma licença permissiva já publicada não pode ser retirada das versões existentes.
+
 ## Ordem
 **0 → 1 → 2** é crítica: o empacotamento define se a Rede Local funciona para os eventos do sprint 3. Depois, 3 a 8 podem ser reordenados pelo que for mais usado.
 

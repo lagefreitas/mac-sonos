@@ -21,6 +21,14 @@ def embedded_menus():
 
 
 class SiteFiles(unittest.TestCase):
+    def test_the_license_is_mit_and_the_site_and_readme_say_so(self):
+        text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("MIT License"))
+        self.assertIn("Permission is hereby granted, free of charge", text)
+        self.assertRegex(text, r"Copyright \(c\) 20\d\d \S")
+        self.assertIn("MIT License", PAGE.read_text(encoding="utf-8"))
+        self.assertIn("[MIT](LICENSE)", (ROOT / "README.md").read_text(encoding="utf-8"))
+
     def test_pages_serves_docs_without_jekyll(self):
         self.assertTrue((ROOT / "docs" / ".nojekyll").exists())
         self.assertTrue((ROOT / "docs" / "404.html").exists())

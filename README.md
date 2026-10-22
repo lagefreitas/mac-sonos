@@ -183,6 +183,16 @@ Notes:
   `"~/Applications/Mac Sonos.app/Contents/MacOS/Mac Sonos" login-item status`.
 - `./autostart.sh uninstall` removes the login item and stops the app.
 
+## License
+
+[MIT](LICENSE). Mac Sonos is an independent project, not affiliated with Sonos, Inc.; "Sonos" is their trademark.
+
+What it builds on keeps its own licenses. The Python libraries it uses are permissively licensed (SoCo, sounddevice,
+PyObjC and py2app: MIT; rumps: BSD). `ffmpeg` (GPL-3.0-or-later in the Homebrew build), BlackHole (see its authors' site,
+existential.audio/blackhole) and SwitchAudioSource (MIT) are installed separately by `setup.sh` and run as separate
+programs; they are not part of this repository or of the app bundle. If you ever redistribute a bundle that includes
+ffmpeg or BlackHole, their licenses apply to what you ship.
+
 ## TODO
 
 Not started; see `PLAN.md` for the reasoning behind each.
