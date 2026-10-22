@@ -83,6 +83,15 @@
   "alarm.new_time_prompt": "Novo horário (HH:MM):",
   "alarm.invalid_time": "Horário inválido. Use HH:MM, por exemplo 07:30.",
 
+  "menu.scenes": "Cenas",
+  "menu.media_keys": "Teclas de mídia controlam o Sonos",
+  "scene.save": "Salvar cena atual…",
+  "scene.remove": "Remover cena",
+  "scene.none": "Nenhuma cena salva",
+  "scene.name_prompt": "Nome da cena:",
+  "scene.invalid": "Cena inválida: {problems}",
+  "media.permission": "Para as teclas de mídia controlarem o Sonos, permita o Mac Sonos em Ajustes do Sistema > Privacidade e Segurança > Acessibilidade. Depois volte aqui e ative a opção de novo.",
+
   "now.nothing": "Nada tocando",
   "transport.previous": "⏮ Anterior",
   "transport.pause": "⏸ Pausar",

@@ -15,7 +15,7 @@ try:
 except Exception:  # pragma: no cover - not on macOS
     HAVE_UI = False
 
-from mac_sonos import config, controller, i18n
+from mac_sonos import config, controller, i18n, scenes
 from mac_sonos.sonos.alarms import AlarmInfo
 from mac_sonos.sonos.library import Favorite, PLAYLIST, QueueEntry, RADIO, TRACK
 from mac_sonos.sonos.monitor import GroupInfo, Monitor, PLAYING, RoomSettings, STOPPED
@@ -405,6 +405,204 @@ class AppTests(unittest.TestCase):
     def test_empty_alarm_list(self):
         app = self.make_app()
         self.assertEqual(list(self.children(app.alarms_menu)), ["Nenhum alarme", "Novo alarme…"])
+
+    # --- scenes ----------------------------------------------------------------------------------
+
+    def scene_app(self):
+        app = self.make_app()
+        now = time.time()
+        app.groups = [GroupInfo("Office", ("Office",), PLAYING, uri=self.MAC_URI, channel="Mac",
+                                levels=(("Office", 15, False),), read_at=now),
+                      GroupInfo("TV Room", ("TV Room",), STOPPED, levels=(("TV Room", 30, True),), read_at=now)]
+        app.settings = {"TV Room": RoomSettings(2, 0, True, False, True, True, True)}
+        app.scene_runner = mock.Mock()
+        app._tick(None)
+        return app
+
+    def test_empty_scene_menu(self):
+        app = self.make_app()
+        self.assertEqual(list(self.children(app.scenes_menu)), ["Nenhuma cena salva", "Salvar cena atual…"])
+
+    def test_saving_the_current_state_as_a_scene(self):
+        app = self.scene_app()
+        app.ctl.state.status, app.ctl.state.rooms, app.ctl.state.url = controller.STREAMING, ["Office"], "http://10.0.0.2:8000/mac.mp3"
+        app.ctl.state.started_at = 0.0
+        with mock.patch.object(app, "_ask", return_value="Trabalho"):
+            app.on_scene_save(None)
+        saved = config.load()["scenes"]
+        self.assertEqual([s["name"] for s in saved], ["Trabalho"])
+        scene = saved[0]
+        self.assertEqual((scene["stream"], scene["stream_rooms"]), ("on", ["Office"]))
+        self.assertEqual(scene["rooms"]["Office"]["volume"], 15)
+        self.assertEqual(scene["rooms"]["TV Room"], {"volume": 30, "mute": True, "bass": 2, "treble": 0, "loudness": True,
+                                                    "night_mode": False, "dialog_mode": True, "surround": True})
+        self.assertEqual(scenes.validate(scene), [])
+        app._tick(None)
+        self.assertEqual(list(self.children(app.scenes_menu)), ["Trabalho", "Salvar cena atual…", "Remover cena"])
+
+    def test_saving_with_the_same_name_replaces_and_cancel_does_nothing(self):
+        app = self.scene_app()
+        for name in ("A", "A"):
+            with mock.patch.object(app, "_ask", return_value=name):
+                app.on_scene_save(None)
+        self.assertEqual([s["name"] for s in config.load()["scenes"]], ["A"])
+        for answer in (None, ""):
+            with mock.patch.object(app, "_ask", return_value=answer):
+                app.on_scene_save(None)
+        self.assertEqual(len(config.load()["scenes"]), 1)
+
+    def test_a_scene_that_is_not_streaming_records_the_stream_as_off(self):
+        app = self.scene_app()   # the controller is stopped
+        with mock.patch.object(app, "_ask", return_value="Silêncio"):
+            app.on_scene_save(None)
+        self.assertEqual(config.load()["scenes"][0]["stream"], "off")
+
+    def test_applying_and_removing_scenes(self):
+        app = self.scene_app()
+        scene = {"name": "Cinema", "stream": "off"}
+        app.cfg["scenes"] = [scene]
+        app._save()
+        app._tick(None)
+        self.children(app.scenes_menu)["Cinema"].callback(None)
+        app.scene_runner.apply_async.assert_called_once_with(scene, app.groups)
+        self.children(self.children(app.scenes_menu)["Remover cena"])["Cinema"].callback(None)
+        self.assertEqual(config.load()["scenes"], [])
+
+    def test_an_invalid_scene_is_not_applied(self):
+        app = self.scene_app()
+        with mock.patch.object(rumps, "alert") as alert:
+            app.on_scene({"name": "x", "stream": "on"})   # no stream_rooms
+        alert.assert_called_once()
+        app.scene_runner.apply_async.assert_not_called()
+
+    def test_scene_actions_start_the_stream_without_touching_the_menu(self):
+        app = self.scene_app()
+        app.ctl.start = mock.Mock()
+        actions = menubar._SceneActions(app)
+        actions.stream_on(["Office", "Sala"], 12)
+        app.ctl.start.assert_called_once()
+        args = app.ctl.start.call_args.args
+        self.assertEqual((args[0], args[6]), (["Office", "Sala"], 12))
+        self.assertEqual(config.load()["rooms"], ["Office", "Sala"])
+        self.assertTrue(app._rooms_dirty and app.want_stream)
+        app._tick(None)
+        self.assertFalse(app._rooms_dirty)
+        app.ctl.start.reset_mock()
+        actions.stream_on(["Office"], None)
+        self.assertEqual(app.ctl.start.call_args.args[6], app.cfg["volume"])   # no scene volume: the usual one
+
+    def test_scene_actions_stop_the_stream(self):
+        app = self.scene_app()
+        app.ctl.stop = mock.Mock()
+        menubar._SceneActions(app).stream_off()
+        app.ctl.stop.assert_called_once_with()
+        self.assertFalse(app.want_stream)
+
+    def test_scene_actions_play_favorites_urls_and_tv_on_the_rooms_group(self):
+        app = self.scene_app()
+        app.library.favorites = [Favorite("LoungeFM", RADIO)]
+        app.library.play_favorite, app.library.play_url = mock.Mock(), mock.Mock()
+        app.monitor.room_command = mock.Mock()
+        actions = menubar._SceneActions(app)
+        actions.favorite("TV Room", "loungefm")                       # case-insensitive
+        self.assertEqual(app.library.play_favorite.call_args.args[0], "TV Room")
+        with self.assertLogs("mac_sonos", level="WARNING"):
+            actions.favorite("TV Room", "Nonexistent")
+            actions.favorite("Nowhere", "LoungeFM")
+            actions.url("Nowhere", "http://a.b/c", "x")
+        self.assertEqual(app.library.play_favorite.call_count, 1)
+        actions.url("Office", "http://a.b/c", "My")
+        app.library.play_url.assert_called_once_with("Office", "http://a.b/c", "My")
+        actions.tv("TV Room")
+        app.monitor.room_command.assert_called_once_with("TV Room", "tv")
+
+    # --- media keys ------------------------------------------------------------------------------
+
+    def key_app(self, streaming=True):
+        app = self.scene_app()
+        app.monitor.command, app.monitor.room_command = mock.Mock(), mock.Mock()
+        if streaming:
+            app.ctl.state.status, app.ctl.state.rooms, app.ctl.state.started_at = controller.STREAMING, ["Office"], 0.0
+        return app
+
+    def test_volume_keys_drive_the_stream_group_while_streaming(self):
+        app = self.key_app()
+        self.assertTrue(app._on_media_key("volume_up", False))
+        app.monitor.command.assert_called_with("Office", "volume_by", 5)
+        self.assertTrue(app._on_media_key("volume_down", True))      # a held volume key keeps going
+        app.monitor.command.assert_called_with("Office", "volume_by", -5)
+
+    def test_volume_keys_go_to_the_mac_when_not_streaming(self):
+        app = self.key_app(streaming=False)
+        self.assertFalse(app._on_media_key("volume_up", False))
+        app.monitor.command.assert_not_called()
+
+    def test_mute_key_mutes_the_whole_group_then_unmutes_it(self):
+        app = self.key_app()
+        app.groups = [GroupInfo("Office", ("Office", "Sala"), PLAYING, uri=self.MAC_URI, channel="Mac",
+                                levels=(("Office", 15, False), ("Sala", 15, True)), read_at=time.time())]
+        app._on_media_key("mute", False)
+        self.assertEqual([c.args for c in app.monitor.room_command.call_args_list],
+                         [("Office", "mute", True), ("Sala", "mute", True)])    # one was loud: mute all
+        app.monitor.room_command.reset_mock()
+        app.groups = [GroupInfo(**{**app.groups[0].__dict__, "levels": (("Office", 15, True), ("Sala", 15, True))})]
+        app._on_media_key("mute", False)
+        self.assertEqual([c.args for c in app.monitor.room_command.call_args_list],
+                         [("Office", "mute", False), ("Sala", "mute", False)])
+
+    def test_transport_keys_drive_the_target_group(self):
+        app = self.key_app(streaming=False)
+        app.cfg["play_target"] = "TV Room"
+        app.groups = [GroupInfo("TV Room", ("TV Room",), PLAYING, uri="x-sonos-spotify:1", read_at=time.time(),
+                                actions=frozenset({"play", "pause", "next", "previous"}))]
+        self.assertTrue(app._on_media_key("play", False))
+        app.monitor.command.assert_called_with("TV Room", "pause")
+        self.assertTrue(app._on_media_key("next", False))
+        app.monitor.command.assert_called_with("TV Room", "next")
+        app.monitor.command.reset_mock()
+        self.assertTrue(app._on_media_key("next", True))             # repeat: swallowed, not repeated
+        app.monitor.command.assert_not_called()
+
+    def test_transport_keys_go_to_the_mac_when_the_stream_is_the_only_thing_playing(self):
+        app = self.key_app()
+        for key in ("play", "next", "previous"):
+            self.assertFalse(app._on_media_key(key, False), key)
+        app.monitor.command.assert_not_called()
+
+    def test_turning_media_keys_on_without_permission_asks_for_it(self):
+        app = self.make_app()
+        with mock.patch.object(app.media_keys, "start", return_value=False) as start, \
+                mock.patch.object(rumps, "alert") as alert:
+            app.on_media_keys(None)
+        start.assert_called_once_with(prompt=True)
+        alert.assert_called_once()
+        self.assertTrue(config.load()["media_keys"])     # stays on: it starts by itself once permission is granted
+
+    def test_with_permission_it_just_turns_on_and_off(self):
+        app = self.make_app()
+        with mock.patch.object(app.media_keys, "start", return_value=True), mock.patch.object(rumps, "alert") as alert, \
+                mock.patch.object(app.media_keys, "stop") as stop:
+            app.on_media_keys(None)
+            alert.assert_not_called()
+            app.on_media_keys(None)
+            stop.assert_called_once()
+        self.assertFalse(config.load()["media_keys"])
+
+    def test_it_retries_quietly_until_the_permission_arrives(self):
+        app = self.make_app()
+        app.cfg["media_keys"] = True
+        with mock.patch.object(app.media_keys, "start", return_value=False) as start:
+            app.ticks = 1
+            for _ in range(10):
+                app._tick_media_keys()
+                app.ticks += 1
+            self.assertGreaterEqual(start.call_count, 2)
+            self.assertTrue(all(c == mock.call(prompt=False) for c in start.call_args_list))
+        app.cfg["media_keys"] = False
+        with mock.patch.object(app.media_keys, "start") as start:
+            app.ticks = 5
+            app._tick_media_keys()
+            start.assert_not_called()
 
     def test_language_menu_is_hidden_with_a_single_language(self):
         app = self.make_app()

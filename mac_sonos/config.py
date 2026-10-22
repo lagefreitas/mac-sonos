@@ -14,6 +14,8 @@ DEFAULTS = {
     "track_in_bar": False,     # menu bar app: show the current track next to the icon
     "play_target": None,       # room whose group favorites, playlists and URLs play on (None: the Mac's first room)
     "radio_urls": [],          # saved stream URLs: [{"title": ..., "url": ...}]
+    "scenes": [],              # saved scenes (see mac_sonos/scenes.py for the format)
+    "media_keys": False,       # menu bar app: media and volume keys control the Sonos (needs Accessibility)
     "language": "auto",        # "auto" follows the system; or a code such as "pt" (see mac_sonos/locales)
 }
 

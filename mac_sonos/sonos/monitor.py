@@ -233,7 +233,7 @@ class Monitor:
 
     def room_command(self, room, action, arg=None):
         """Queue a room command: volume (0-100), volume_by (relative), mute (bool, None toggles), join
-        (arg: coordinator name of the group to join), unjoin, bass_by / treble_by (relative, -10..10), loudness /
+        (arg: coordinator name of the group to join), unjoin, bass / treble (absolute) or bass_by / treble_by (relative), -10..10, loudness /
         night_mode / dialog_mode / surround (bool, None toggles) or tv (soundbars: switch to the TV input). room=None with 'ungroup_all' splits every group."""
         self._commands.put(("room", room, action, arg))
 
@@ -471,6 +471,9 @@ class Monitor:
             zone.join(group.coordinator)
         elif action == "unjoin":
             zone.unjoin()
+        elif action in ("bass", "treble"):
+            setattr(zone, action, max(-10, min(10, int(arg))))
+            self._settings_dirty.add(room)
         elif action in ("bass_by", "treble_by"):
             attr = action[:-3]
             setattr(zone, attr, max(-10, min(10, getattr(zone, attr) + arg)))

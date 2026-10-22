@@ -79,8 +79,14 @@ Vem cedo porque a permissão de Rede Local define se o resto funciona.
   semana personalizados na criação (aparecem se criados no app do Sonos), som de alarme que não seja o toque padrão, e
   persistir o timer do Mac entre reinícios do app.
 
-## Sprint 8: Cenas e atalhos
+## Sprint 8: Cenas e atalhos (FEITO, teclas de mídia sem teste com teclas reais)
 - Cenas em JSON (cômodos, volumes, EQ, fonte, stream do Mac). Teclas de mídia e atalhos globais (exigem permissão de Acessibilidade); modo liga/desliga.
+- Feito: cenas (capturar, plano puro, executor com esperas, menu, JSON editável); teclas de mídia via event tap, opt-in,
+  com decisão testável. Escolha de desenho: volume só é desviado enquanto o Mac transmite (o volume do Mac é o nível do
+  sinal), e play/próxima/anterior só agem sobre grupos com algo real tocando, senão vão para o macOS. Não feito:
+  atalhos globais com combinações próprias, e teste das teclas físicas (a permissão de Acessibilidade é do usuário).
+  `ungroup_all` e regrupamento por cena foram testados só com dublês no nível de cena (os comandos de grupo individuais
+  foram testados no sprint 4).
 
 ## Sprint 9 (opcional): Painel
 - Janela única (`pywebview`). Só se o menu ficar apertado; decidir depois do sprint 6.

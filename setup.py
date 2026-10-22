@@ -18,7 +18,7 @@ setup(
     app=["app.py"],
     options={"py2app": {
         "plist": PLIST,
-        "packages": ["mac_sonos", "soco", "sounddevice", "_sounddevice_data", "rumps", "ServiceManagement"],
+        "packages": ["mac_sonos", "soco", "sounddevice", "_sounddevice_data", "rumps", "ServiceManagement", "Quartz", "ApplicationServices"],
         "includes": ["cffi", "_cffi_backend"],
     }},
     setup_requires=["py2app"],

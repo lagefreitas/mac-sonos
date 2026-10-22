@@ -51,6 +51,28 @@ change the time, repeat (every day, weekdays, weekends, once; custom weekday set
 and volume, remove. Alarms live in the speakers, play the Sonos chime and fire even if the Mac is off. They cannot
 play the Mac's audio.
 
+**Cenas:** "Salvar cena atual…" records the house as it is: grouping, every room's volume, mute and sound settings,
+whether the Mac streams (and to which rooms), and a TV or URL-radio source if one is playing. Choosing a scene brings
+it back: stream off, regroup, start the stream, then volumes, mute, sound settings and source, waiting where a step
+depends on the previous one. A scene is plain JSON under `scenes` in the config file, so it can be edited by hand
+(for example to add a favorite as the source):
+
+    {"name": "Cinema", "stream": "off", "groups": [["TV Room"], ["Office"]],
+     "rooms": {"TV Room": {"volume": 25, "mute": false, "dialog_mode": true, "surround": true}},
+     "source": {"type": "tv", "room": "TV Room"}}
+
+`stream` is `on` (with `stream_rooms`), `off` or `keep`; `groups` is the exact grouping or `null` to leave it alone;
+a room may set `volume`, `mute`, `bass`, `treble`, `loudness`, `night_mode`, `dialog_mode`, `surround`; `source` is
+`{"type": "tv"|"favorite"|"url", "room": ..., "title"/"url": ...}`. Invalid scenes are refused with a message.
+
+**Teclas de mídia controlam o Sonos** (off by default; needs the Accessibility permission): while the Mac streams,
+the volume and mute keys act on the Sonos group that plays the stream, and the Mac's own volume (the signal level
+feeding it) stays at 100%. Play/pause, next and previous act on the group chosen in "Tocar em" when something real
+plays there; for the Mac's own stream they still go to the Mac (YouTube, Spotify...), which is what a stream has no
+transport for. With nothing playing on the Sonos every key goes to macOS as usual. Turn it on from the menu; macOS
+asks to allow Mac Sonos in System Settings > Privacy & Security > Accessibility, and the option starts working by
+itself once you do. `"Mac Sonos" media-keys` (in `Contents/MacOS`) says whether the permission is in place.
+
 **Interrompido:** if someone stops the Mac stream outside this app, the icon turns ⏸, the status says
 "Interrompido no Sonos", and the main button becomes "Ligar" to start it again (nothing restarts by itself).
 

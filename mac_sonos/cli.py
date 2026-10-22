@@ -69,6 +69,19 @@ def cmd_nowplaying(_):
         monitor.stop()
 
 
+def cmd_media_keys(_):
+    from .ui import mediakeys
+    trusted = mediakeys.is_trusted()
+    print("Accessibility: " + ("granted" if trusted else
+          "NOT granted (System Settings > Privacy & Security > Accessibility)"))
+    try:
+        import Quartz  # noqa: F401
+        from AppKit import NSEvent  # noqa: F401
+        print("Quartz and AppKit: available")
+    except Exception as e:
+        print("Quartz/AppKit problem:", e)
+
+
 def cmd_login_item(args):
     from .ui import loginitem
     names = {0: "not registered", 1: "enabled", 2: "requires approval (System Settings > General > Login Items)",
@@ -157,6 +170,7 @@ def main():
     r.add_argument("--volume", type=int, help="set Sonos volume (0-100) on start")
     r.set_defaults(fn=cmd_run)
     sub.add_parser("nowplaying", help="live view of what every Sonos group is playing").set_defaults(fn=cmd_nowplaying)
+    sub.add_parser("media-keys", help="can this process capture media keys? (Accessibility permission)").set_defaults(fn=cmd_media_keys)
     li = sub.add_parser("login-item", help="open at login (only inside Mac Sonos.app)")
     li.add_argument("action", choices=["status", "enable", "disable"])
     li.set_defaults(fn=cmd_login_item)

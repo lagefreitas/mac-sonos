@@ -6,7 +6,7 @@ import time
 
 import rumps
 
-from .. import config, i18n
+from .. import config, i18n, scenes
 from ..controller import CONNECTING, STREAMING, Controller
 from ..core import output
 from ..i18n import t
@@ -15,6 +15,7 @@ from ..sonos.alarms import AlarmManager, parse_time
 from ..sonos.library import Library, default_title as library_default_title, valid_stream_url
 from ..sonos.monitor import Monitor
 from . import loginitem, model
+from .mediakeys import MediaKeys
 
 log = logging.getLogger("mac_sonos")
 
@@ -37,6 +38,10 @@ class MenuBarApp(rumps.App):
         self._library_key = None
         self.alarm_manager = AlarmManager(self.monitor.any_zone, self.monitor.zone_for_room)
         self._alarms_key = None
+        self._scenes_key = None
+        self._rooms_dirty = False   # a scene changed the stream rooms from its own thread: redraw on the next tick
+        self.scene_runner = scenes.Runner(_SceneActions(self))
+        self.media_keys = MediaKeys(self._on_media_key)
         self.mac_sleep = None       # SleepTimer for the Mac's own stream, while one is running
         self._last_fade = None
         self._sleep_items = {}      # coordinator -> menu item showing the time left
@@ -70,12 +75,14 @@ class MenuBarApp(rumps.App):
         self.login_item = self._static_item("menu.login", self.on_login_item)
         self.library_menu = self._static_item("menu.library")
         self.alarms_menu = self._static_item("menu.alarms")
+        self.scenes_menu = self._static_item("menu.scenes")
+        self.media_item = self._static_item("menu.media_keys", self.on_media_keys)
         self.language_menu = self._static_item("menu.language")
         self._rebuild_languages()
         self.menu = [
             self.status_item, self.warning_item, self.toggle_item, self.track_item, None,
-            self.now_menu, self.house_menu, self.library_menu, self.alarms_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
-            self.autostart_item, self.bar_item, self.login_item, *([self.language_menu] if len(self.language_menu) else []),
+            self.now_menu, self.house_menu, self.library_menu, self.alarms_menu, self.scenes_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
+            self.autostart_item, self.bar_item, self.media_item, self.login_item, *([self.language_menu] if len(self.language_menu) else []),
             self._static_item("menu.refresh", self.on_refresh), self._static_item("menu.quit", self.on_quit),
         ]
         self._refresh_checks()
@@ -84,6 +91,7 @@ class MenuBarApp(rumps.App):
         self._rebuild_house()
         self._rebuild_library()
         self._rebuild_alarms()
+        self._rebuild_scenes()
         self.on_refresh(None)
         self.monitor.start()
         self.library.start()
@@ -119,7 +127,7 @@ class MenuBarApp(rumps.App):
             item.title = t(key)
         self._rebuild_languages()
         self._rebuild_rooms()
-        self._now_key = self._house_key = self._library_key = self._alarms_key = None  # next tick rebuilds, new language
+        self._now_key = self._house_key = self._library_key = self._alarms_key = self._scenes_key = None  # redrawn next tick
 
     # --- actions --------------------------------------------------------------------------------
 
@@ -193,6 +201,7 @@ class MenuBarApp(rumps.App):
 
     def on_quit(self, _):
         self.timer.stop()
+        self.media_keys.stop()
         self._cancel_mac_sleep()
         self.alarm_manager.stop()
         self.library.stop()
@@ -210,6 +219,7 @@ class MenuBarApp(rumps.App):
         self.autostart_item.state = int(self.cfg["autostart_stream"])
         self.bar_item.state = int(self.cfg["track_in_bar"])
         self.login_item.state = int(loginitem.status() == loginitem.ENABLED)
+        self.media_item.state = int(self.cfg["media_keys"])
 
     def _rebuild_rooms(self):
         if len(self.rooms_menu):  # rumps' clear() fails on a submenu that was never filled
@@ -329,6 +339,97 @@ class MenuBarApp(rumps.App):
                 item, label = self._house_items[room]
                 text = model.level_text(volume, muted)
                 item.title, label.title = f"{room}  ·  {text}", t("house.volume_label", level=text)
+
+    # --- scenes ---------------------------------------------------------------------------------
+
+    def on_scene_save(self, _):
+        name = self._ask(t("scene.name_prompt"), "", title=t("menu.scenes"))
+        if not name:
+            return
+        state = self.ctl.state
+        streaming = state.status == STREAMING and not self.interrupted
+        scene = scenes.capture(name, self.groups, self.settings, list(state.rooms) if streaming else None,
+                               scenes.RADIO_PREFIX + state.url if streaming and state.url else None)
+        self.cfg["scenes"] = model.with_scene(self.cfg["scenes"], scene)
+        self._save()
+        self._scenes_key = None
+
+    def on_scene(self, scene):
+        problems = scenes.validate(scene)
+        if problems:
+            rumps.alert(t("menu.scenes"), t("scene.invalid", problems="; ".join(problems)))
+        else:
+            self.scene_runner.apply_async(scene, self.groups)
+
+    def on_scene_remove(self, name):
+        self.cfg["scenes"] = model.without_scene(self.cfg["scenes"], name)
+        self._save()
+        self._scenes_key = None
+
+    def _rebuild_scenes(self):
+        menu = self.scenes_menu
+        if len(menu):
+            menu.clear()
+        names = model.scene_names(self.cfg["scenes"])
+        if not names:
+            menu.add(rumps.MenuItem(t("scene.none")))
+        for scene in self.cfg["scenes"]:
+            menu.add(rumps.MenuItem(model.shorten(scene["name"], 40), callback=lambda _, s=scene: self.on_scene(s)))
+        menu.add(None)
+        menu.add(rumps.MenuItem(t("scene.save"), callback=self.on_scene_save))
+        if names:
+            remove = rumps.MenuItem(t("scene.remove"))
+            for name in names:
+                remove.add(rumps.MenuItem(model.shorten(name, 40), callback=lambda _, n=name: self.on_scene_remove(n)))
+            menu.add(remove)
+
+    def _update_scenes(self):
+        key = repr(self.cfg["scenes"])
+        if key != self._scenes_key:
+            self._scenes_key = key
+            self._rebuild_scenes()
+        if self._rooms_dirty:
+            self._rooms_dirty = False
+            self._rebuild_rooms()
+
+    # --- media keys -----------------------------------------------------------------------------
+
+    def on_media_keys(self, _):
+        self.cfg["media_keys"] = not self.cfg["media_keys"]
+        self._save()
+        if self.cfg["media_keys"]:
+            if not self.media_keys.start(prompt=True):
+                rumps.alert(t("menu.media_keys"), t("media.permission"))
+        else:
+            self.media_keys.stop()
+
+    def _on_media_key(self, key, repeat):
+        """Called by the event tap on the main thread: True swallows the key."""
+        state = self.ctl.state
+        streaming = state.status == STREAMING and not self.interrupted
+        stream_group = next((g for g in self.groups if state.rooms and state.rooms[0] in g.members), None)
+        target = model.play_target(self.groups, self.cfg["rooms"], self.cfg["play_target"])
+        action = model.decide_key(key, streaming, stream_group, target)
+        if action is None:
+            return False
+        if repeat and key not in model.VOLUME_KEYS:
+            return True  # a held key must not fire again, and must not leak to the system either
+        kind = action[0]
+        if kind == "volume_by":
+            self.monitor.command(action[1], "volume_by", action[2])
+        elif kind == "mute_group":
+            group = next(g for g in self.groups if g.coordinator == action[1])
+            all_muted = bool(group.levels) and all(muted for _, _, muted in group.levels)
+            for room in group.members:
+                self.monitor.room_command(room, "mute", not all_muted)
+        elif kind == "transport":
+            self.monitor.command(action[1], action[2])
+        return True
+
+    def _tick_media_keys(self):
+        """Retry quietly while the option is on but macOS has not granted the permission yet."""
+        if self.cfg["media_keys"] and not self.media_keys.active and (self.ticks == 1 or self.ticks % 5 == 0):
+            self.media_keys.start(prompt=False)
 
     # --- sleep timer ----------------------------------------------------------------------------
 
@@ -629,6 +730,8 @@ class MenuBarApp(rumps.App):
         self._update_house()
         self._update_library()
         self._update_alarms()
+        self._update_scenes()
+        self._tick_media_keys()
         self._tick_mac_sleep()
         icon = model.TITLES[model.INTERRUPTED if interrupted else state.status]
         self.title = model.bar_title(icon, primary) if self.cfg["track_in_bar"] else icon
@@ -638,3 +741,55 @@ class MenuBarApp(rumps.App):
         if state.status != STREAMING or self.ticks % 5 == 0:
             self.warning_item._menuitem.setHidden_(warning is None)
             self.warning_item.title = warning or ""
+
+
+class _SceneActions:
+    """What a scene's steps do in this app. They run on the scene's own thread, so they only queue work and never
+    touch the menu (the stream rooms are redrawn by the next tick)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    def room(self, room, action, arg):
+        self.app.monitor.room_command(room, action, arg)
+
+    def groups(self):
+        return self.app.groups
+
+    def streaming(self):
+        return self.app.ctl.state.status == STREAMING
+
+    def stream_on(self, rooms, volume):
+        app = self.app
+        app.cfg["rooms"] = list(rooms)
+        config.save(app.cfg)
+        app._rooms_dirty = True
+        app.want_stream = True
+        app.last_attempt = time.time()
+        c = app.cfg
+        app.ctl.start(rooms, c["device"], c["format"], c["port"], None, False, c["volume"] if volume is None else volume)
+
+    def stream_off(self):
+        self.app.want_stream = False
+        self.app.ctl.stop()
+
+    def tv(self, room):
+        self.app.monitor.room_command(room, "tv")
+
+    def _coordinator(self, room):
+        return next((g.coordinator for g in self.app.groups if room in g.members), None)
+
+    def favorite(self, room, title):
+        fav = next((f for f in self.app.library.favorites if f.title.casefold() == title.casefold()), None)
+        coordinator = self._coordinator(room)
+        if fav is None or coordinator is None:
+            log.warning("scene: favorite %r or room %r not found", title, room)
+            return
+        self.app.library.play_favorite(coordinator, fav)
+
+    def url(self, room, url, title):
+        coordinator = self._coordinator(room)
+        if coordinator is None:
+            log.warning("scene: room %r not found", room)
+            return
+        self.app.library.play_url(coordinator, url, title)

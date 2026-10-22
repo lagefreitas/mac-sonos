@@ -349,3 +349,49 @@ def recurrence_label(recurrence):
 def alarm_title(info):
     from ..sonos.alarms import format_time as clock
     return t("alarm.title", time=clock(info.time), room=info.room, repeat=recurrence_label(info.recurrence))
+
+
+# --- media keys ----------------------------------------------------------------------------------
+VOLUME_KEYS = ("volume_up", "volume_down", "mute")
+MEDIA_VOLUME_DELTA = 5
+
+
+def decide_key(key, streaming, stream_group, target):
+    """What a media key should do, or None to let macOS have it.
+
+    While the Mac streams, the volume keys drive the Sonos group that plays the stream: the Mac's own volume is
+    the signal level feeding it and must stay at 100%. Play, next and previous act on the target group when
+    something real is playing there; for the Mac's own stream they go to the Mac (it has no transport of its own).
+    Returns ("volume_by", coordinator, delta), ("mute_group", coordinator), ("transport", coordinator, action)
+    or ("noop",) for a key we take but have nothing to do with."""
+    if key in VOLUME_KEYS:
+        if not (streaming and stream_group):
+            return None
+        if key == "mute":
+            return ("mute_group", stream_group.coordinator)
+        return ("volume_by", stream_group.coordinator, MEDIA_VOLUME_DELTA * (1 if key == "volume_up" else -1))
+    if target is None or not is_active(target) or is_mac_stream(target):
+        return None
+    actions = target.actions
+    if key == "play":
+        if target.state == PLAYING and "pause" in actions:
+            return ("transport", target.coordinator, "pause")
+        if target.state != PLAYING and "play" in actions:
+            return ("transport", target.coordinator, "play")
+        return ("noop",)
+    wanted = {"next": "next", "previous": "previous"}.get(key)
+    return ("transport", target.coordinator, wanted) if wanted in actions else ("noop",)
+
+
+# --- scenes --------------------------------------------------------------------------------------
+def scene_names(scenes):
+    return [s["name"] for s in scenes]
+
+
+def with_scene(scenes, scene):
+    """The list with `scene` added, replacing one of the same name."""
+    return [s for s in scenes if s["name"] != scene["name"]] + [scene]
+
+
+def without_scene(scenes, name):
+    return [s for s in scenes if s["name"] != name]
