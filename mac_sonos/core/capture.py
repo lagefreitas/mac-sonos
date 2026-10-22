@@ -11,6 +11,7 @@ registers a reader for the length of one connection.
 """
 import contextlib
 import logging
+import time
 from contextlib import contextmanager
 
 from . import output
@@ -19,6 +20,8 @@ from .formats import RATE
 log = logging.getLogger("mac_sonos")
 
 BLACKHOLE, TAP = "blackhole", "tap"
+RETRY_DELAY = 1.5           # seconds between tap attempts once the permission is (or may be) granted
+ATTEMPTS_AFTER_GRANT = 3
 KINDS = (BLACKHOLE, TAP)
 
 
@@ -64,21 +67,30 @@ class TapCapture:
         return contextlib.nullcontext()   # the Mac's output is left alone
 
     def start(self):
+        """Open the tap. Without the permission macOS holds the audio back, and it shows its own dialog the first
+        time; after "Allow" it takes a moment to take effect, so a few spaced attempts follow a first failure."""
         from . import tapcapture as tc
         try:
             self._open(tc)
+            return
         except tc.TapNoAudio:
-            # No audio: the permission is missing. Ask once if macOS has never been asked, then try again.
-            state = tc.audio_permission()
-            log.info("tap gave no audio; system audio permission is %s", state)
-            if state == "denied":
+            pass
+        state = tc.audio_permission()
+        log.info("tap gave no audio; system audio permission is %s", state)
+        if state == "denied":
+            raise tc.TapPermissionError() from None
+        if state == "undetermined":   # the dialog is probably up already: wait for the answer
+            answer = tc.request_audio_permission(timeout=60)
+            if answer is False or (answer is not True and tc.audio_permission() != "granted"):
                 raise tc.TapPermissionError() from None
-            if state == "undetermined" and tc.request_audio_permission(timeout=60) is not True:
-                raise tc.TapPermissionError() from None
+        for _ in range(ATTEMPTS_AFTER_GRANT):
+            time.sleep(RETRY_DELAY)
             try:
                 self._open(tc)
+                return
             except tc.TapNoAudio:
-                raise tc.TapPermissionError() from None
+                continue
+        raise tc.TapPermissionError() from None
 
     def _open(self, tc):
         self.source = tc.TapSource(mute_local=self.mute_mac)

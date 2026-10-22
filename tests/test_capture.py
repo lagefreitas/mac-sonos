@@ -109,6 +109,9 @@ class TapPermissionFlow(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         self.c = capture.TapCapture(mute_mac=True)
+        delay = mock.patch.object(capture, "RETRY_DELAY", 0)
+        delay.start()
+        self.addCleanup(delay.stop)
 
     def test_it_just_starts_when_audio_flows(self):
         self.c.start()
@@ -148,10 +151,51 @@ class TapPermissionFlow(unittest.TestCase):
             self.c.start()
         self.request.assert_not_called()
 
-    def test_granted_but_still_silent_is_reported_as_permission_trouble(self):
-        FakeSource.outcomes = [tc.TapNoAudio("no audio"), tc.TapNoAudio("no audio")]
+    def test_granted_but_still_silent_is_reported_as_permission_trouble_after_a_few_tries(self):
+        FakeSource.outcomes = [tc.TapNoAudio("no audio")] * 4
         with self.assertRaises(tc.TapPermissionError):
             self.c.start()
+        self.assertEqual(len(FakeSource.instances), 1 + capture.ATTEMPTS_AFTER_GRANT)
+
+    def test_a_permission_just_granted_takes_a_moment_to_apply(self):
+        """What happened for real: the dialog was answered during the first attempt, and the next one, right away,
+        still got no audio; the third worked."""
+        FakeSource.outcomes = [tc.TapNoAudio("no audio"), tc.TapNoAudio("no audio")]
+        self.c.start()                                  # state is "granted": no dialog, only patience
+        self.assertEqual(len(FakeSource.instances), 3)
+        self.assertTrue(FakeSource.instances[2].started)
+        self.request.assert_not_called()
+
+    def test_the_attempts_are_spaced_out(self):
+        FakeSource.outcomes = [tc.TapNoAudio("no audio")] * 4
+        with mock.patch.object(capture, "RETRY_DELAY", 1.5), mock.patch.object(capture.time, "sleep") as sleep:
+            with self.assertRaises(tc.TapPermissionError):
+                self.c.start()
+        self.assertEqual([c.args for c in sleep.call_args_list], [(1.5,)] * capture.ATTEMPTS_AFTER_GRANT)
+
+    def test_the_dialog_is_answered_while_we_wait_and_then_the_audio_comes(self):
+        FakeSource.outcomes = [tc.TapNoAudio("no audio"), tc.TapNoAudio("no audio")]
+        self.permission, self.request.return_value = "undetermined", True
+        self.c.start()
+        self.assertEqual(len(FakeSource.instances), 3)
+
+    def test_no_answer_to_the_request_but_the_permission_appears_granted(self):
+        FakeSource.outcomes = [tc.TapNoAudio("no audio")]
+        self.permission, self.request.return_value = "undetermined", None
+
+        def request(timeout):
+            self.permission = "granted"   # answered in the dialog; our call just never heard back
+            return None
+        self.request.side_effect = request
+        self.c.start()
+        self.assertTrue(FakeSource.instances[-1].started)
+
+    def test_when_the_permission_state_cannot_be_read_it_still_tries_again(self):
+        FakeSource.outcomes = [tc.TapNoAudio("no audio")]
+        self.permission = "unavailable"
+        self.c.start()
+        self.request.assert_not_called()
+        self.assertEqual(len(FakeSource.instances), 2)
 
     def test_other_errors_pass_through_untouched(self):
         FakeSource.outcomes = [tc.TapError("create the process tap", -50)]
