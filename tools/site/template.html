@@ -11,7 +11,13 @@
 <meta property="og:title" content="Mac Sonos">
 <meta property="og:description" content="Use old Sonos speakers without AirPlay as your Mac's speaker, and control your whole Sonos from the menu bar.">
 <meta property="og:url" content="https://lagefreitas.github.io/mac-sonos/">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://lagefreitas.github.io/mac-sonos/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Mac Sonos: use your old Sonos as your Mac's speaker">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://lagefreitas.github.io/mac-sonos/og.png">
+<meta name="author" content="André Lage-Freitas">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1020'/%3E%3Cpath d='M16 26h8l10-9v30l-10-9h-8z' fill='%23fff'/%3E%3Cpath d='M42 24c4 4 4 12 0 16M48 18c7 7 7 21 0 28' fill='none' stroke='%237aa7ff' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
 :root{
@@ -36,6 +42,14 @@ img,svg{max-width:100%}
 .wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
 /* language switching: every translated block carries a lang attribute */
 html[data-lang="en"] [lang="pt"],html[data-lang="pt"] [lang="en"]{display:none!important}
+
+/* text that is only in English but stays visible in the Portuguese view */
+html[data-lang="pt"] .keep[lang="en"]{display:revert!important}
+.story{max-width:68ch}
+.story p{color:var(--muted);font-size:17px}
+.story p:first-child{color:var(--fg)}
+.byline{margin:22px 0 14px;font-size:14px}
+.byline a{white-space:nowrap}
 
 /* header */
 header.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
@@ -198,6 +212,17 @@ footer li{margin:4px 0}
       <span lang="en">Older Sonos speakers such as the Play:1 and the first Playbar can't receive AirPlay, so macOS has no way to send sound to them. The Sonos app doesn't help either: it plays from music services, not from your Mac. Mac Sonos fills the gap by listening to what your Mac plays and serving it on your network as a radio stream that Sonos knows how to play. Pick the rooms, set the volume, and your Mac has speakers again.</span>
       <span lang="pt">Sonos antigos, como a Play:1 e a primeira Playbar, não recebem AirPlay, então o macOS não tem como enviar som para eles. O app da Sonos também não resolve: ele toca de serviços de música, não do seu Mac. O Mac Sonos preenche essa lacuna: escuta o que o Mac toca e serve isso na sua rede como uma rádio que o Sonos sabe tocar. Escolha os cômodos, ajuste o volume, e o Mac volta a ter caixas de som.</span>
     </p>
+  </div>
+</section>
+
+<section id="story">
+  <div class="wrap">
+    <h2 class="keep" lang="en">Why I built this</h2>
+    <div class="story keep" lang="en">
+      <p>I have several Play:1s and the first Playbar. They still sound good to me, but none of them can take AirPlay, so my Mac could never use them as speakers.</p>
+      <p>I wanted exactly that: the Sonos as my Mac's speaker. The official app also lacks a few things I wanted, so I started with a quick script that streamed my Mac's audio to one room, and it grew into the menu bar app you see here.</p>
+      <p>Most of the code was written by <a href="https://claude.com/claude-code">Claude Code</a> (Claude Sonnet 5.5) under my direction: I decided what to build and tested every step on my own speakers.</p>
+    </div>
   </div>
 </section>
 
@@ -380,6 +405,7 @@ open ~/Applications/"Mac Sonos.app"</code><button class="copy" type="button" dat
         </ul>
       </div>
     </div>
+    <p class="byline keep" lang="en">Made by <b>__AUTHOR_NAME__</b>__AUTHOR_LINKS__ · Built with <a href="https://claude.com/claude-code">Claude Code</a> (Claude Sonnet 5.5).</p>
     <p class="disclaimer">
       <span lang="en">Released under the <a href="https://github.com/lagefreitas/mac-sonos/blob/main/LICENSE">MIT License</a>.</span>
       <span lang="pt">Publicado sob a <a href="https://github.com/lagefreitas/mac-sonos/blob/main/LICENSE">Licença MIT</a>.</span>

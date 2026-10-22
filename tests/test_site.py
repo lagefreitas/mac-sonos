@@ -2,6 +2,8 @@
 import importlib.util
 import json
 import re
+import struct
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -20,6 +22,43 @@ def embedded_menus():
     return json.loads(re.search(r"const MENUS = (.*?);\nconst LANG_NAMES", html, re.S).group(1))
 
 
+class Branding(unittest.TestCase):
+    def test_share_image_is_a_1200_by_630_png_and_the_tags_point_at_it(self):
+        data = (ROOT / "docs" / "og.png").read_bytes()
+        self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+        width, height = struct.unpack(">II", data[16:24])
+        self.assertEqual((width, height), (1200, 630))
+        self.assertLess(len(data), 600_000)   # link previews are fetched by crawlers: keep it light
+        html = PAGE.read_text(encoding="utf-8")
+        for tag in ('property="og:image" content="https://lagefreitas.github.io/mac-sonos/og.png"',
+                    'name="twitter:image" content="https://lagefreitas.github.io/mac-sonos/og.png"',
+                    'name="twitter:card" content="summary_large_image"',
+                    'property="og:image:width" content="1200"', 'property="og:image:height" content="630"'):
+            self.assertIn(tag, html)
+
+    def test_the_byline_names_the_author_and_the_ai_help_truthfully(self):
+        html = PAGE.read_text(encoding="utf-8")
+        author = json.loads((ROOT / "tools" / "site" / "author.json").read_text(encoding="utf-8"))
+        self.assertIn(f"Made by <b>{author['name']}</b>", html)
+        self.assertIn("Claude Code", html)
+        # the model named on the page is the one the commits credit
+        trailers = subprocess.run(["git", "log", "--format=%B"], cwd=ROOT, capture_output=True, text=True).stdout
+        credited = set(re.findall(r"Co-Authored-By: (Claude [A-Za-z]+ [\d.]+)", trailers))
+        named = re.findall(r"Claude Code</a> \((Claude [A-Za-z]+ [\d.]+)\)", html)
+        self.assertTrue(named and set(named) <= credited, f"page names {named}, commits credit {credited}")
+        self.assertIn(f"Copyright (c) 2026 {author['name']}", (ROOT / "LICENSE").read_text(encoding="utf-8"))
+
+    def test_no_placeholder_leaks_and_the_linkedin_link_is_valid_or_absent(self):
+        html = PAGE.read_text(encoding="utf-8")
+        self.assertNotRegex(html, r"__[A-Z_]+__")
+        author = json.loads((ROOT / "tools" / "site" / "author.json").read_text(encoding="utf-8"))
+        if author["linkedin"]:
+            self.assertRegex(author["linkedin"], r"^https://([a-z]{2,3}\.)?linkedin\.com/in/[^/\s]+/?$")
+            self.assertIn(f'<a href="{author["linkedin"]}" rel="me">LinkedIn</a>', html)
+        else:
+            self.assertNotIn("linkedin.com", html)
+
+
 class SiteFiles(unittest.TestCase):
     def test_the_license_is_mit_and_the_site_and_readme_say_so(self):
         text = (ROOT / "LICENSE").read_text(encoding="utf-8")
@@ -35,12 +74,21 @@ class SiteFiles(unittest.TestCase):
         self.assertTrue(PAGE.exists())
 
     def test_every_english_block_has_a_portuguese_twin(self):
+        """Except the blocks marked "keep": English on purpose, shown in the Portuguese view too."""
         html = PAGE.read_text(encoding="utf-8")
         body = html[html.index("<body>"):html.index("<script>")]
-        chunks = re.findall(r'<([a-z0-9]+)[^>]*\slang="(en|pt)"[^>]*>', body)
-        en = [t for t, l in chunks if l == "en"]
-        pt = [t for t, l in chunks if l == "pt"]
+        en, pt = [], []
+        for tag, attrs in re.findall(r"<([a-z0-9]+)([^>]*)>", body):
+            lang = re.search(r'\slang="(en|pt)"', attrs)
+            if lang and "keep" not in (re.search(r'class="([^"]*)"', attrs) or [None, ""])[1].split():
+                (en if lang.group(1) == "en" else pt).append(tag)
         self.assertEqual(en, pt, "the English and Portuguese blocks must come in the same order and kinds")
+        self.assertGreater(len(en), 50)
+
+    def test_the_english_only_blocks_stay_visible_in_the_portuguese_view(self):
+        html = PAGE.read_text(encoding="utf-8")
+        self.assertIn('html[data-lang="pt"] .keep[lang="en"]{display:revert!important}', html)
+        self.assertRegex(html, r'<h2 class="keep" lang="en">Why I built this</h2>')
 
     def test_no_resource_is_loaded_from_the_network(self):
         html = PAGE.read_text(encoding="utf-8")

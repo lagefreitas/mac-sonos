@@ -108,8 +108,13 @@ def menus():
 
 def main():
     template = (ROOT / "tools" / "site" / "template.html").read_text(encoding="utf-8")
+    author = json.loads((ROOT / "tools" / "site" / "author.json").read_text(encoding="utf-8"))
+    links = ""
+    if author.get("linkedin"):   # an empty value leaves the link out instead of publishing a wrong one
+        links += f' · <a href="{author["linkedin"]}" rel="me">LinkedIn</a>'
     data = menus()
-    page = template.replace("__MENUS__", json.dumps(data, ensure_ascii=False))
+    page = (template.replace("__MENUS__", json.dumps(data, ensure_ascii=False))
+            .replace("__AUTHOR_NAME__", author["name"]).replace("__AUTHOR_LINKS__", links))
     (ROOT / "docs").mkdir(exist_ok=True)
     (ROOT / "docs" / "index.html").write_text(page, encoding="utf-8")
     count = sum(1 for _ in json.dumps(data["en"]).split('"title"')) - 1

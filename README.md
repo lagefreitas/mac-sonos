@@ -155,7 +155,9 @@ Lookup falls back to English, then Portuguese; a missing key shows the key and i
 `docs/` is the site, served by GitHub Pages from the `main` branch. `docs/index.html` is generated: edit
 `tools/site/template.html` and run `.venv/bin/python tools/build_site.py`. The menu tour on the page is the real menu of
 the app, rendered headless with made-up rooms in every language, so it changes when the menu changes; a test fails if
-the committed page is out of date.
+the committed page is out of date. The author's name and LinkedIn link live in `tools/site/author.json` (an empty
+`linkedin` leaves the link out); the share image shown in link previews is `docs/og.png`, rendered from
+`tools/site/og.html` by `tools/build_og.sh` (needs Google Chrome).
 
 ## Notes
 
@@ -182,6 +184,11 @@ Notes:
 - Log: `~/Library/Logs/mac-sonos.log`. Debug commands run inside the bundle:
   `"~/Applications/Mac Sonos.app/Contents/MacOS/Mac Sonos" login-item status`.
 - `./autostart.sh uninstall` removes the login item and stops the app.
+
+## About
+
+Made by André Lage-Freitas. Most of the code was written by [Claude Code](https://claude.com/claude-code) (Claude Sonnet 5.5)
+under the author's direction; the author decided what to build and tested every step on their own speakers.
 
 ## License
 
