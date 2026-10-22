@@ -4,3 +4,5 @@ rumps
 pyobjc-framework-ServiceManagement
 pyobjc-framework-Quartz
 pyobjc-framework-ApplicationServices
+pyobjc-framework-CoreAudio
+py2app
