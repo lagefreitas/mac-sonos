@@ -99,7 +99,8 @@ class PermissionTexts(unittest.TestCase):
     def test_every_language_has_its_lproj_with_both_texts(self):
         for lang in i18n.available_languages():
             strings = parse_strings(ROOT / "bundle" / f"{lang}.lproj" / "InfoPlist.strings")
-            self.assertEqual(sorted(strings), ["NSLocalNetworkUsageDescription", "NSMicrophoneUsageDescription"], lang)
+            self.assertEqual(sorted(strings), ["NSAudioCaptureUsageDescription", "NSLocalNetworkUsageDescription",
+                                               "NSMicrophoneUsageDescription"], lang)
             for key, text in strings.items():
                 self.assertGreater(len(text), 20, f"{lang}:{key}")
 
