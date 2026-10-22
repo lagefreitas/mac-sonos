@@ -152,3 +152,14 @@ Notes:
 - Log: `~/Library/Logs/mac-sonos.log`. Debug commands run inside the bundle:
   `"~/Applications/Mac Sonos.app/Contents/MacOS/Mac Sonos" login-item status`.
 - `./autostart.sh uninstall` removes the login item and stops the app.
+
+## TODO
+
+Not started; see `PLAN.md` for the reasoning behind each.
+
+- **Control panel window (sprint 9).** One window (`pywebview`) with the whole house at a glance: rooms, groups, cover
+  art, queue and scenes, for when the menu gets cramped. Only worth it if the menu proves too narrow in daily use.
+- **Sonos cloud API and search (sprint 10).** Register an integration at Sonos Developer, local OAuth with the token
+  in the Keychain, then search and play artists and albums from the music services (what the Sonos MCP connector does),
+  and reach the favorites the local API cannot play (service hubs, artists). Only if the favorites turn out not to be
+  enough.
