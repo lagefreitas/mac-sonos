@@ -1,8 +1,8 @@
 """HTTP stream of the captured audio.
 
-Each Sonos connection gets its own capture and ffmpeg, so a stream always starts at the live edge.
-ffmpeg's own avfoundation capture drops chunks of audio (vinyl crackle), so PortAudio captures
-and feeds ffmpeg through a pipe.
+Each Sonos connection gets its own reader of the capture (see capture.py) and its own ffmpeg, so a stream always
+starts at the live edge. ffmpeg's own avfoundation capture drops chunks of audio (vinyl crackle), so the audio is
+captured elsewhere and fed to ffmpeg through a pipe.
 """
 import logging
 import queue
@@ -11,9 +11,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 
-import sounddevice as sd
-
-from .formats import FORMATS, RATE, ffmpeg_cmd
+from .formats import FORMATS, ffmpeg_cmd
 
 log = logging.getLogger("mac_sonos")
 
@@ -28,15 +26,16 @@ class StreamHandler(BaseHTTPRequestHandler):
         sent = 0
         log.info("stream: GET from %s", self.client_address[0])
 
-        def on_audio(indata, frames, t, status):
+        def on_audio(chunk):
             if not first:
                 first.append(time.time() - t0)
             try:
-                pcm.put_nowait(bytes(indata))
+                pcm.put_nowait(chunk)
             except queue.Full:
                 pass
 
-        ff = subprocess.Popen(ffmpeg_cmd(cfg), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        capture = cfg["capture"]
+        ff = subprocess.Popen(ffmpeg_cmd({**cfg, "rate": capture.rate}), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL)
 
         def feed():
@@ -48,8 +47,7 @@ class StreamHandler(BaseHTTPRequestHandler):
 
         threading.Thread(target=feed, daemon=True).start()
         try:
-            with sd.RawInputStream(device=cfg["device"], samplerate=RATE, channels=2, dtype="int16",
-                                   latency=0.1, callback=on_audio):
+            with capture.open(on_audio):
                 self.send_response(200)
                 self.send_header("Content-Type", FORMATS[cfg["fmt"]][1])
                 self.send_header("Cache-Control", "no-cache")
@@ -68,6 +66,15 @@ class StreamHandler(BaseHTTPRequestHandler):
             log.info("stream: ended after %.1fs, %d bytes sent", time.time() - t0, sent)
             pcm.put(None)
             ff.kill()
+            for pipe in (ff.stdin, ff.stdout):   # kill() alone leaves the pipes open and a zombie behind
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
+            try:
+                ff.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                log.warning("stream: ffmpeg did not exit")
 
     def log_message(self, *args):
         pass

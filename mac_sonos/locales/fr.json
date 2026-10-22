@@ -120,5 +120,10 @@
   "login.only_app": "Disponible uniquement dans Mac Sonos.app (voir build-app.sh).",
   "login.approve": "Approuvez Mac Sonos dans Réglages Système > Général > Ouverture.",
   "error.device_not_found": "Périphérique audio « {device} » introuvable. Si BlackHole est installé, chargez-le avec `sudo killall coreaudiod` (ou redémarrez) ; voir `python -m mac_sonos devices`.",
-  "error.room_not_found": "Pièce « {room} » introuvable. Disponibles : {available}"
+  "error.room_not_found": "Pièce « {room} » introuvable. Disponibles : {available}",
+  "menu.capture": "Capture",
+  "capture.blackhole": "BlackHole",
+  "capture.tap": "Audio système (sans BlackHole)",
+  "capture.mute_mac": "Couper le son du Mac pendant la diffusion",
+  "error.tap_permission": "Mac Sonos a besoin de l'autorisation d'enregistrement de l'audio système (Réglages Système > Confidentialité et sécurité)."
 }

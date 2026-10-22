@@ -9,6 +9,8 @@ DEFAULTS = {
     "volume": 15,
     "format": "mp3",
     "device": "BlackHole 2ch",
+    "capture": "blackhole",    # "blackhole" (needs BlackHole) or "tap" (system audio; needs System Audio Recording)
+    "mute_mac": True,          # with "tap": silence the Mac while it streams (BlackHole always does)
     "port": 8000,
     "autostart_stream": True,  # menu bar app: start streaming when it opens
     "track_in_bar": False,     # menu bar app: show the current track next to the icon

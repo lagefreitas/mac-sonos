@@ -10,8 +10,14 @@ from . import config
 from .controller import ERROR, STREAMING, Controller
 from .core import output
 from .core.formats import FORMATS
+from .core.capture import BlackHoleCapture, KINDS as _CAPTURE_KINDS
+from .core.tapcapture import TapPermissionError
 from .core.session import Session
 from .sonos import discovery
+
+
+def capture_kinds():
+    return list(_CAPTURE_KINDS)
 
 
 def cmd_list(_):
@@ -32,7 +38,8 @@ def cmd_run(args):
     ctl = Controller()
     signal.signal(signal.SIGTERM, signal.default_int_handler)  # pkill / logout restore the output too
     try:
-        ctl.start(rooms, device, fmt, args.port or cfg["port"], args.bitrate, args.lowlat, volume)
+        ctl.start(rooms, device, fmt, args.port or cfg["port"], args.bitrate, args.lowlat, volume,
+                  capture=args.capture or cfg["capture"], mute_mac=cfg["mute_mac"] and not args.keep_mac_sound)
         state = ctl.wait_for(STREAMING, ERROR)
         if state.status == ERROR:
             sys.exit(state.error)
@@ -90,6 +97,20 @@ def cmd_tap_test(args):
         if args.request:
             print("asking macOS (answer the dialog)...", flush=True)
             print("answer:", tc.request_audio_permission(), "| now:", tc.audio_permission(), flush=True)
+        return
+    if args.source:   # the capture the app uses, end to end, without the network
+        import math
+        import time
+        from .core.capture import TapCapture
+        chunks, source = [], TapCapture(mute_mac=args.mute)
+        source.start()
+        with source.open(chunks.append):
+            time.sleep(args.seconds)
+        source.stop()
+        samples = memoryview(b"".join(chunks)).cast("h")
+        peak = max((abs(x) for x in samples), default=0)
+        print({"rate": source.rate, "frames": len(samples) // 2, "frames_per_second": round(len(samples) / 2 / args.seconds),
+               "peak_db": round(20 * math.log10(peak / 32768), 1) if peak else None}, flush=True)
         return
     if args.ioproc:
         result = tapcapture.probe_ioproc(args.seconds, args.output, mute_local=args.mute)
@@ -151,7 +172,7 @@ def cmd_bench(args):
         for name in args.configs or list(CONFIGS):
             lat = []
             for _ in range(args.runs):
-                session = Session(rooms, args.device, port=args.port, volume=args.volume, **CONFIGS[name])
+                session = Session(rooms, BlackHoleCapture(args.device), port=args.port, volume=args.volume, **CONFIGS[name])
                 try:
                     session.start()
                     m = measure(session)
@@ -180,6 +201,8 @@ def main():
     r = sub.add_parser("run", help="stream Mac audio to Sonos")
     r.add_argument("rooms", nargs="*", help="room names (first is the group leader); default: saved config")
     r.add_argument("--device")
+    r.add_argument("--keep-mac-sound", action="store_true", help="with --capture tap: do not silence the Mac")
+    r.add_argument("--capture", choices=capture_kinds(), help="where the Mac's audio comes from (default: config)")
     r.add_argument("--port", type=int)
     r.add_argument("--format", choices=FORMATS)
     r.add_argument("--bitrate", help="mp3/aac bitrate, e.g. 192k")
@@ -193,6 +216,7 @@ def main():
     tt.add_argument("--output", help="name of the output device to use as the aggregate's clock")
     tt.add_argument("--permission", action="store_true", help="only print the system audio permission state")
     tt.add_argument("--request", action="store_true", help="ask macOS for the permission (shows its dialog)")
+    tt.add_argument("--source", action="store_true", help="run the TapCapture the app uses (needs no network)")
     tt.add_argument("--ioproc", action="store_true", help="read through an IOProc on the aggregate (ctypes)")
     tt.add_argument("--mute", action="store_true", help="also silence the local output while tapped")
     tt.set_defaults(fn=cmd_tap_test)
@@ -211,5 +235,5 @@ def main():
     args = p.parse_args()
     try:
         args.fn(args)
-    except (output.DeviceNotFound, discovery.RoomNotFound) as e:
+    except (output.DeviceNotFound, discovery.RoomNotFound, TapPermissionError) as e:
         sys.exit(str(e))

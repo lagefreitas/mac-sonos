@@ -688,6 +688,86 @@ class AppTests(unittest.TestCase):
         err = State(status="error", error="x", error_key="error.device_not_found", error_vars={"device": "BlackHole 2ch"})
         self.assertIn("« BlackHole 2ch » introuvable", menubar.model.status_text(err))
 
+    # --- capture source --------------------------------------------------------------------------
+
+    def test_capture_menu_lists_both_sources_and_the_mute_option(self):
+        app = self.make_app()
+        items = self.children(app.capture_menu)
+        self.assertEqual(list(items), ["BlackHole", "Áudio do sistema (sem BlackHole)", "Silenciar o Mac ao transmitir"])
+        self.assertEqual([items["BlackHole"].state, items["Áudio do sistema (sem BlackHole)"].state], [1, 0])  # default
+        self.assertEqual(items["Silenciar o Mac ao transmitir"].state, 1)
+
+    def test_choosing_the_system_audio_source_saves_it_and_restarts_only_a_running_stream(self):
+        app = self.make_app()
+        app.ctl.start = mock.Mock()
+        tap = self.children(app.capture_menu)["Áudio do sistema (sem BlackHole)"]
+        tap.callback(None)                         # not streaming: only remembered
+        self.assertEqual(config.load()["capture"], "tap")
+        app.ctl.start.assert_not_called()
+        self.assertEqual([i.state for i in list(app.capture_menu.values())[:2]], [0, 1])
+        app.ctl.state.status = controller.STREAMING
+        self.children(app.capture_menu)["BlackHole"].callback(None)   # streaming: restart on the new source
+        self.assertEqual(config.load()["capture"], "blackhole")
+        app.ctl.start.assert_called_once()
+        self.assertEqual(app.ctl.start.call_args.kwargs, {"capture": "blackhole", "mute_mac": True})
+
+    def test_choosing_the_same_source_again_does_nothing(self):
+        app = self.make_app()
+        app.ctl.start = mock.Mock()
+        app.ctl.state.status = controller.STREAMING
+        self.children(app.capture_menu)["BlackHole"].callback(None)
+        app.ctl.start.assert_not_called()
+
+    def test_the_mute_option_only_restarts_a_stream_that_uses_the_tap(self):
+        app = self.make_app()
+        app.ctl.start = mock.Mock()
+        app.ctl.state.status = controller.STREAMING
+        mute = self.children(app.capture_menu)["Silenciar o Mac ao transmitir"]
+        mute.callback(None)                         # BlackHole always mutes the Mac: nothing to restart
+        self.assertFalse(config.load()["mute_mac"])
+        app.ctl.start.assert_not_called()
+        self.children(app.capture_menu)["Áudio do sistema (sem BlackHole)"].callback(None)
+        app.ctl.start.reset_mock()
+        self.children(app.capture_menu)["Silenciar o Mac ao transmitir"].callback(None)
+        app.ctl.start.assert_called_once()
+        self.assertEqual(app.ctl.start.call_args.kwargs, {"capture": "tap", "mute_mac": True})
+
+    def test_the_stream_starts_with_the_saved_capture_settings(self):
+        app = self.make_app()
+        app.cfg["capture"], app.cfg["mute_mac"] = "tap", False
+        app.ctl.start = mock.Mock()
+        app._start()
+        self.assertEqual(app.ctl.start.call_args.kwargs, {"capture": "tap", "mute_mac": False})
+        app.ctl.start.reset_mock()
+        menubar._SceneActions(app).stream_on(["Office"], 12)    # scenes use them too
+        self.assertEqual(app.ctl.start.call_args.kwargs, {"capture": "tap", "mute_mac": False})
+
+    def test_the_mac_volume_warning_is_for_blackhole_only(self):
+        app = self.make_app()
+        app.ctl.state.status = controller.STREAMING
+        app.ctl.state.rooms = ["Office"]
+        app.ctl.state.started_at = time.time()
+        with mock.patch.object(menubar.output, "mac_volume", return_value=31) as volume:
+            app.ticks = 4
+            app._tick(None)                          # BlackHole: the volume is the signal level, so it warns
+            self.assertEqual(volume.call_count, 1)
+            self.assertIn("31%", app.warning_item.title)
+            app.cfg["capture"] = "tap"
+            app.ticks = 9
+            app._tick(None)                          # the tap ignores the Mac's volume: no warning
+            self.assertEqual(volume.call_count, 1)
+            self.assertEqual(app.warning_item.title, "")
+
+    def test_the_capture_menu_follows_the_language(self):
+        app = self.make_app()
+        app.on_language("en")
+        self.assertEqual(list(self.children(app.capture_menu)),
+                         ["BlackHole", "System audio (no BlackHole)", "Mute the Mac while streaming"])
+        self.assertIn("Capture", self.top_titles(app))
+        app.on_language("fr")
+        self.assertEqual(list(self.children(app.capture_menu))[1:], ["Audio système (sans BlackHole)",
+                                                                      "Couper le son du Mac pendant la diffusion"])
+
     def test_language_menu_is_hidden_with_a_single_language(self):
         for code in ("en", "es", "fr"):
             (self.locales / f"{code}.json").unlink()

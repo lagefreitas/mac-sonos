@@ -8,7 +8,7 @@ import rumps
 
 from .. import config, i18n, scenes
 from ..controller import CONNECTING, STREAMING, Controller
-from ..core import output
+from ..core import capture as capture_mod, output
 from ..i18n import t
 from ..sonos import art, discovery
 from ..sonos.alarms import AlarmManager, parse_time
@@ -69,6 +69,10 @@ class MenuBarApp(rumps.App):
         for v in model.VOLUME_STEPS:
             self.volume_menu.add(rumps.MenuItem(f"{v}%", callback=self.on_volume))
         self.format_menu = self._static_item("menu.format")
+        self.capture_menu = self._static_item("menu.capture")
+        self._capture_items = {}
+        self.mute_mac_item = None
+        self._rebuild_capture()
         for f in model.FORMAT_CHOICES:
             self.format_menu.add(rumps.MenuItem(f, callback=self.on_format))
         self.autostart_item = self._static_item("menu.autostart", self.on_autostart)
@@ -81,7 +85,7 @@ class MenuBarApp(rumps.App):
         self._rebuild_languages()
         self.menu = [
             self.status_item, self.warning_item, self.toggle_item, self.track_item, None,
-            self.now_menu, self.house_menu, self.library_menu, self.alarms_menu, self.scenes_menu, self.rooms_menu, self.volume_menu, self.format_menu, None,
+            self.now_menu, self.house_menu, self.library_menu, self.alarms_menu, self.scenes_menu, self.rooms_menu, self.volume_menu, self.format_menu, self.capture_menu, None,
             self.autostart_item, self.bar_item, self.media_item, self.login_item, *([self.language_menu] if len(self.language_menu) else []),
             self._static_item("menu.refresh", self.on_refresh), self._static_item("menu.quit", self.on_quit),
         ]
@@ -126,6 +130,7 @@ class MenuBarApp(rumps.App):
         for item, key in self._static:
             item.title = t(key)
         self._rebuild_languages()
+        self._rebuild_capture()
         self._rebuild_rooms()
         self._now_key = self._house_key = self._library_key = self._alarms_key = self._scenes_key = None  # redrawn next tick
 
@@ -138,7 +143,8 @@ class MenuBarApp(rumps.App):
         c = self.cfg
         self.want_stream = True
         self.last_attempt = time.time()
-        self.ctl.start(c["rooms"], c["device"], c["format"], c["port"], None, False, c["volume"])
+        self.ctl.start(c["rooms"], c["device"], c["format"], c["port"], None, False, c["volume"],
+                       capture=c["capture"], mute_mac=c["mute_mac"])
 
     def _save(self):
         config.save(self.cfg)
@@ -167,6 +173,36 @@ class MenuBarApp(rumps.App):
         self.cfg["format"] = sender.title
         self._save()
         if self._active():
+            self._start()
+
+    def _rebuild_capture(self):
+        """The two sources (BlackHole, system audio) and the option to mute the Mac; titles follow the language."""
+        menu = self.capture_menu
+        if len(menu):
+            menu.clear()
+        self._capture_items = {}
+        for kind, key in ((capture_mod.BLACKHOLE, "capture.blackhole"), (capture_mod.TAP, "capture.tap")):
+            item = rumps.MenuItem(t(key), callback=lambda _, k=kind: self.on_capture(k))
+            item.state = int(self.cfg["capture"] == kind)
+            self._capture_items[kind] = item
+            menu.add(item)
+        menu.add(None)
+        self.mute_mac_item = rumps.MenuItem(t("capture.mute_mac"), callback=self.on_mute_mac)
+        self.mute_mac_item.state = int(self.cfg["mute_mac"])
+        menu.add(self.mute_mac_item)
+
+    def on_capture(self, kind):
+        if kind == self.cfg["capture"]:
+            return
+        self.cfg["capture"] = kind
+        self._save()
+        if self._active():
+            self._start()
+
+    def on_mute_mac(self, _):
+        self.cfg["mute_mac"] = not self.cfg["mute_mac"]
+        self._save()
+        if self._active() and self.cfg["capture"] == capture_mod.TAP:
             self._start()
 
     def on_autostart(self, _):
@@ -218,6 +254,10 @@ class MenuBarApp(rumps.App):
             item.state = int(item.title == self.cfg["format"])
         self.autostart_item.state = int(self.cfg["autostart_stream"])
         self.bar_item.state = int(self.cfg["track_in_bar"])
+        for kind, item in self._capture_items.items():
+            item.state = int(self.cfg["capture"] == kind)
+        if self.mute_mac_item is not None:
+            self.mute_mac_item.state = int(self.cfg["mute_mac"])
         self.login_item.state = int(loginitem.status() == loginitem.ENABLED)
         self.media_item.state = int(self.cfg["media_keys"])
 
@@ -737,7 +777,10 @@ class MenuBarApp(rumps.App):
         self.title = model.bar_title(icon, primary) if self.cfg["track_in_bar"] else icon
         self.status_item.title = model.status_text(state, interrupted)
         self.toggle_item.title = model.toggle_label(state.status, interrupted)
-        warning = model.volume_warning(output.mac_volume()) if state.status == STREAMING and self.ticks % 5 == 0 else None
+        # the Mac's volume is the signal level only for BlackHole; the system audio tap ignores it
+        blackhole = self.cfg["capture"] == capture_mod.BLACKHOLE
+        warning = (model.volume_warning(output.mac_volume())
+                   if state.status == STREAMING and blackhole and self.ticks % 5 == 0 else None)
         if state.status != STREAMING or self.ticks % 5 == 0:
             self.warning_item._menuitem.setHidden_(warning is None)
             self.warning_item.title = warning or ""
@@ -767,7 +810,8 @@ class _SceneActions:
         app.want_stream = True
         app.last_attempt = time.time()
         c = app.cfg
-        app.ctl.start(rooms, c["device"], c["format"], c["port"], None, False, c["volume"] if volume is None else volume)
+        app.ctl.start(rooms, c["device"], c["format"], c["port"], None, False, c["volume"] if volume is None else volume,
+                      capture=c["capture"], mute_mac=c["mute_mac"])
 
     def stream_off(self):
         self.app.want_stream = False

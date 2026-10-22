@@ -9,12 +9,11 @@ from .stream import StreamHandler
 
 
 class Session:
-    def __init__(self, rooms, device="BlackHole 2ch", fmt="mp3", port=8000, bitrate=None,
-                 lowlat=False, volume=None):
+    def __init__(self, rooms, capture, fmt="mp3", port=8000, bitrate=None, lowlat=False, volume=None):
         self.rooms, self.volume, self.fmt, self.port = rooms, volume, fmt, port
         self.leader = rooms[0]
         self.server = ThreadingHTTPServer(("0.0.0.0", port), StreamHandler)
-        self.server.cfg = dict(device=device, fmt=fmt, bitrate=bitrate, lowlat=lowlat)
+        self.server.cfg = dict(capture=capture, fmt=fmt, bitrate=bitrate, lowlat=lowlat)
         self.server.gets = []
 
     def start(self):

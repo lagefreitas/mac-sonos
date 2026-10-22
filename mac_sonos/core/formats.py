@@ -25,7 +25,7 @@ def ffmpeg_cmd(cfg):
     cmd = ["ffmpeg", "-loglevel", "error"]
     if cfg["lowlat"]:
         cmd += ["-fflags", "+nobuffer", "-flags", "+low_delay", "-probesize", "32"]
-    cmd += ["-f", "s16le", "-ar", str(RATE), "-ac", "2", "-i", "pipe:0", "-ar", "44100"]
+    cmd += ["-f", "s16le", "-ar", str(int(cfg.get("rate") or RATE)), "-ac", "2", "-i", "pipe:0", "-ar", "44100"]
     bitrate = cfg["bitrate"] or default_br
     if bitrate:
         cmd += ["-b:a", bitrate]
