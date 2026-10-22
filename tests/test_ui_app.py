@@ -1,6 +1,7 @@
 """The menu bar app itself, instantiated headless (needs macOS + rumps): python -m unittest discover tests"""
 import datetime
 import json
+import re
 import tempfile
 import time
 from types import SimpleNamespace
@@ -604,39 +605,128 @@ class AppTests(unittest.TestCase):
             app._tick_media_keys()
             start.assert_not_called()
 
+    # --- every menu, every language -------------------------------------------------------------
+
+    def all_titles(self, menu):
+        out = []
+        for item in menu.values():
+            title = getattr(item, "title", None)
+            if title:
+                out.append(title)
+            if hasattr(item, "values") and len(item):
+                out += self.all_titles(item)
+        return out
+
+    def rich_app(self):
+        """An app whose every menu has something in it: playing groups, queue, library, alarms, scenes, radios."""
+        app = self.make_app()
+        now = time.time()
+        app.library.favorites = [Favorite("LoungeFM", RADIO), Favorite("Brahms", TRACK), Favorite("My list", PLAYLIST)]
+        app.library.playlists = [mock.Mock(title="Degas")]
+        app.library.queues = {"TV Room": (QueueEntry(0, "Bubbly", "Eliza"), QueueEntry(1, "Poker Face", "Gaga"))}
+        app.library.version = 1
+        app.groups = [
+            GroupInfo("Office", ("Office", "Sala"), PLAYING, uri=self.MAC_URI, channel="Mac",
+                      levels=(("Office", 20, False), ("Sala", 15, True)), read_at=now),
+            GroupInfo("TV Room", ("TV Room",), PLAYING, title="Bubbly", artist="Eliza", album="Album", duration=200,
+                      uri="x-sonos-spotify:1", queue_position=1, sleeping=True, sleep_remaining=900,
+                      actions=frozenset({"play", "pause", "next", "previous", "seektime"}),
+                      levels=(("TV Room", 30, False),), read_at=now)]
+        app.settings = {"Office": RoomSettings(3, 1, True),
+                        "TV Room": RoomSettings(2, 0, True, False, True, True, True)}
+        app.alarm_manager.alarms = [AlarmInfo("1", "Office", datetime.time(6, 30), "WEEKDAYS", True, 20),
+                                    AlarmInfo("2", "TV Room", datetime.time(23, 0), "ON_06", False, 10)]
+        app.alarm_manager.version += 1
+        app.cfg["scenes"] = [{"name": "Cinema", "stream": "off"}]
+        app.cfg["radio_urls"] = [{"title": "Groove Salad", "url": "http://ice1.somafm.com/g"}]
+        app.mac_sleep = menubar.model.SleepTimer(30, 20, now)
+        return app
+
+    KEY_LIKE = re.compile(r"(?<![\w.])[a-z_]+(\.[a-z_0-9]+)+(?![\w.])")
+
+    def test_no_raw_key_or_placeholder_reaches_the_screen_in_any_language(self):
+        app = self.rich_app()
+        by_language = {}
+        for code in ("pt", "en", "es", "fr"):
+            app.on_language(code)
+            app._tick(None)
+            titles = by_language[code] = self.all_titles(app.menu)
+            self.assertGreater(len(titles), 80, code)    # the menus really are populated
+            for title in titles:
+                plain = title.replace("http://", "").replace("ice1.somafm.com", "")
+                self.assertIsNone(self.KEY_LIKE.search(plain), f"{code}: raw key in {title!r}")
+                self.assertNotIn("{", title, f"{code}: unresolved placeholder in {title!r}")
+                self.assertNotIn("}", title, f"{code}: unresolved placeholder in {title!r}")
+        for code in ("en", "es", "fr"):
+            self.assertNotEqual(by_language[code], by_language["pt"], code)
+
+    def test_the_menus_really_change_language(self):
+        app = self.rich_app()
+        expected = {"pt": ["Agora tocando", "Biblioteca", "Alarmes", "Cenas", "Restam", "Todos os dias"],
+                    "en": ["Now playing", "Library", "Alarms", "Scenes", "left", "Weekdays"],
+                    "es": ["Reproduciendo ahora", "Biblioteca", "Alarmas", "Escenas", "Quedan", "Días laborables"],
+                    "fr": ["En cours de lecture", "Bibliothèque", "Alarmes", "Scènes", "Il reste", "En semaine"]}
+        for code, words in expected.items():
+            app.on_language(code)
+            app._tick(None)
+            joined = "\n".join(self.all_titles(app.menu))
+            for word in words:
+                self.assertIn(word, joined, f"{code}: {word!r} missing")
+
+    def test_dynamic_texts_are_translated_too(self):
+        from mac_sonos.controller import State
+        for code, expect in (("pt", ("Parado", "Interrompido no Sonos", "Tocando em Office")),
+                             ("en", ("Stopped", "Interrupted on Sonos", "Playing in Office")),
+                             ("es", ("Detenido", "Interrumpido en Sonos", "Reproduciendo en Office")),
+                             ("fr", ("Arrêté", "Interrompu sur Sonos", "Lecture dans Office"))):
+            i18n.set_language(code)
+            self.assertEqual(menubar.model.status_text(State()), expect[0])
+            self.assertEqual(menubar.model.status_text(State(), interrupted=True), expect[1])
+            self.assertEqual(menubar.model.status_text(State(status="streaming", rooms=["Office"])), expect[2])
+            self.assertIn("31", menubar.model.volume_warning(31))
+        i18n.set_language("fr")
+        err = State(status="error", error="x", error_key="error.device_not_found", error_vars={"device": "BlackHole 2ch"})
+        self.assertIn("« BlackHole 2ch » introuvable", menubar.model.status_text(err))
+
     def test_language_menu_is_hidden_with_a_single_language(self):
+        for code in ("en", "es", "fr"):
+            (self.locales / f"{code}.json").unlink()
+        i18n._catalogs.clear()
         app = self.make_app()
         self.assertEqual(i18n.available_languages(), ["pt"])
         self.assertNotIn("Idioma", self.top_titles(app))
 
     def test_switching_language_retitles_the_menu(self):
-        en = {k: (v if k.startswith("meta.") else f"EN {v}") for k, v in
-              json.loads((self.locales / "pt.json").read_text(encoding="utf-8")).items()}
-        en["meta.language_name"] = "English"
-        (self.locales / "en.json").write_text(json.dumps(en), encoding="utf-8")
-        i18n._catalogs.clear()
         app = self.make_app()
-        self.assertIn("Idioma", self.top_titles(app))
-        self.assertEqual([i.title for i in app.language_menu.values()], ["Automático", "English", "Português"])
-        self.assertIn("Sair", self.top_titles(app))
+        self.assertEqual(i18n.available_languages(), ["en", "es", "fr", "pt"])
+        self.assertIn("Idioma", self.top_titles(app))   # the system says pt-BR
+        self.assertEqual([i.title for i in app.language_menu.values()],
+                         ["Automático", "English", "Español", "Français", "Português"])
 
-        app.on_language("en")
-        titles = self.top_titles(app)
-        self.assertIn("EN Sair", titles)
-        self.assertIn("EN Idioma", titles)
-        self.assertEqual(config.load()["language"], "en")
-        app.groups = self.groups()
-        app._tick(None)
-        self.assertEqual(app.status_item.title, "EN Parado")
-        self.assertTrue(any(i.title.startswith("EN Procurando") or i.title.startswith("Office")
-                            for i in app.house_menu.values() if hasattr(i, "title")))
-        checked = {i.title: i.state for i in app.language_menu.values()}
-        self.assertEqual(checked["English"], 1)
+        for code, quit_title, language_title, stopped in (("en", "Quit", "Language", "Stopped"),
+                                                          ("es", "Salir", "Idioma", "Detenido"),
+                                                          ("fr", "Quitter", "Langue", "Arrêté")):
+            app.on_language(code)
+            titles = self.top_titles(app)
+            self.assertIn(quit_title, titles, code)
+            self.assertIn(language_title, titles, code)
+            self.assertEqual(config.load()["language"], code)
+            app.groups = self.groups()
+            app._tick(None)
+            self.assertEqual(app.status_item.title, stopped, code)
+            self.assertEqual({i.title: i.state for i in app.language_menu.values()}[
+                {"en": "English", "es": "Español", "fr": "Français"}[code]], 1)
 
-        app.on_language("auto")  # system says pt-BR
+        app.on_language("auto")  # the system language is pt-BR
         self.assertEqual(i18n.current_language(), "pt")
         self.assertIn("Sair", self.top_titles(app))
 
+    def test_the_languages_menu_names_are_each_languages_own(self):
+        app = self.make_app()
+        app.on_language("fr")
+        # the names stay in their own language whatever the menu language is, so a lost user can find theirs
+        self.assertEqual([i.title for i in app.language_menu.values()],
+                         ["Automatique", "English", "Español", "Français", "Português"])
 
 if __name__ == "__main__":
     unittest.main()

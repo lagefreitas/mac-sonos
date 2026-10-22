@@ -111,12 +111,20 @@ Settings live in `~/Library/Application Support/mac-sonos/config.json` (rooms, v
 
 ## Interface language
 
+The menu comes in Portuguese (`pt`), English (`en`), Spanish (`es`) and French (`fr`). "Idioma / Language" in the
+menu offers **Automatic** (follows the first of your macOS preferred languages that the app has, else English) or a
+fixed language, saved as `language` in the config; each language is named in its own tongue so it can always be found.
+Note that Automatic uses macOS's *first* language: with English first and Portuguese second, the menu is in English;
+pick Português to pin it. The Microphone and Local Network permission texts macOS shows are translated too
+(`bundle/<lang>.lproj/InfoPlist.strings`, copied into the app by `build-app.sh`).
+
 All UI text lives in `mac_sonos/locales/<code>.json` and is read with `t("key", name=value)` (`mac_sonos/i18n.py`);
-nothing in the UI modules may contain text of its own. Portuguese (`pt`) is the base. To add a language:
-copy `pt.json` to `<code>.json`, translate the values (keep the keys and every `{placeholder}`), and set
-`meta.language_name` to the language's own name. `python -m unittest discover tests` checks that the new file has the
-same keys and placeholders as `pt.json` and that no UI text is hard-coded. With two or more catalogs the menu gets an
-"Idioma" submenu (Automático follows the system language; the choice is saved as `language` in the config).
+nothing in the UI modules may contain text of its own. To add a language: copy `pt.json` to `<code>.json`, translate
+the values (keep the keys and every `{placeholder}`), set `meta.language_name` to the language's own name, add
+`bundle/<code>.lproj/InfoPlist.strings` with the two permission texts, and run `python -m unittest discover tests`.
+The tests check that the new catalog has the same keys and placeholders as `pt.json`, that nothing was left untranslated
+by accident (values equal to Portuguese must be listed on purpose in `tests/test_translations.py`), that menu entries
+stay narrow, that no raw key or `{placeholder}` reaches any menu in any language, and that no UI text is hard-coded.
 Lookup falls back to English, then Portuguese; a missing key shows the key and is logged once.
 
 ## Notes

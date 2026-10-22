@@ -107,7 +107,7 @@ laranja de microfone enquanto há stream. Um process tap captura o áudio do sis
 - Alternativa descartada por ora: ScreenCaptureKit (áudio apenas), que exige Gravação de Tela.
 - Se o protótipo falhar, manter o BlackHole e documentar o indicador como inevitável.
 
-## Sprint 12: Localização da interface (en, es, fr; pt-BR é a base) — INFRAESTRUTURA FEITA
+## Sprint 12: Localização da interface (en, es, fr; pt-BR é a base) — FEITO
 Hoje todos os textos da UI estão em português, espalhados em `ui/menubar.py` e `ui/model.py`.
 - Centralizar as strings: um catálogo por idioma (`mac_sonos/ui/locales/{pt,en,es,fr}.json` ou `gettext`) e uma
   função `t("chave", **vars)`; nada de texto de UI fora dele. Plurais e variáveis (`{rooms}`, `{pct}`) tratados no
@@ -120,7 +120,11 @@ Hoje todos os textos da UI estão em português, espalhados em `ui/menubar.py` e
   string de UI fora do catálogo (teste que varre `ui/`).
 - Feito: `i18n.py` (`t`, `tn`, fallback en→pt, detecção do idioma do sistema), `locales/pt.json` com todos os textos da
   UI, erros localizáveis, menu "Idioma" (escondido enquanto só houver pt), testes de paridade/uso/sem texto no código.
-  Falta: traduzir en/es/fr, `InfoPlist.strings` por idioma, README por idioma e revisar larguras do menu.
+  Traduções en/es/fr (122 chaves cada, terminologia dos apps da Sonos), `InfoPlist.strings` por idioma no pacote,
+  larguras revisadas (maior item: 37 caracteres em es/fr contra 33 em pt) e testes de qualidade (valores iguais ao pt só
+  se listados de propósito, sem vazamento de chave crua em nenhum menu de nenhum idioma). O README fica só em inglês:
+  é documentação para quem desenvolve, não parte da interface. Observação: "Automático" segue o *primeiro* idioma do
+  macOS; com inglês antes de português, o menu abre em inglês.
 - Recomendação: antecipar a infraestrutura (catálogo + `t()`) antes de crescer mais a UI, com o pt como único idioma;
   traduzir en/es/fr no fim. Cada sprint seguinte já nasce usando `t()`.
 - Risco: o menu muda de largura com o idioma (es/fr são mais longos); revisar textos de barra e abreviações.
