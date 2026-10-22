@@ -400,6 +400,8 @@ class TapSource:
         self._keep = None
         self._ca = None
         self._first = None
+        self.calls = 0          # IOProc invocations seen, and the most input buffers any of them carried:
+        self.max_buffers = 0    # what tells "nothing is calling us" from "called, but no tap data"
 
     # --- lifecycle ------------------------------------------------------------------------------
 
@@ -415,6 +417,7 @@ class TapSource:
 
             def callback(device, now, in_data, in_time, out_data, out_time, client):
                 try:
+                    self.calls += 1
                     self._on_buffers(in_data)
                 except Exception:  # an exception must never unwind into Core Audio's thread
                     log.exception("tap callback failed")
@@ -428,7 +431,8 @@ class TapSource:
             if status != NO_ERROR:
                 raise TapError("start the device", status)
             if not self._first.wait(self.first_audio_timeout):
-                raise TapNoAudio("no audio arrived from the tap")
+                raise TapNoAudio(f"no audio arrived from the tap (IOProc calls: {self.calls}, "
+                                 f"most input buffers in a call: {self.max_buffers})")
             log.info("tap capture running at %s Hz", self.rate)
         except Exception:
             self.stop()
@@ -492,6 +496,7 @@ class TapSource:
         ca = self._ca
         abl = ctypes.cast(in_data, ctypes.POINTER(ca.AudioBufferList)).contents
         n = abl.count
+        self.max_buffers = max(self.max_buffers, n)
         if not n:
             return
         raw = (ca.AudioBuffer * n).from_address(ctypes.addressof(abl.buffers))

@@ -73,10 +73,10 @@ class TapCapture:
         try:
             self._open(tc)
             return
-        except tc.TapNoAudio:
-            pass
+        except tc.TapNoAudio as e:
+            first_failure = e
         state = tc.audio_permission()
-        log.info("tap gave no audio; system audio permission is %s", state)
+        log.info("tap gave no audio (%s); system audio permission is %s", first_failure, state)
         if state == "denied":
             raise tc.TapPermissionError() from None
         if state == "undetermined":   # the dialog is probably up already: wait for the answer
