@@ -312,6 +312,16 @@ class TapPermissionError(Exception):
         self.vars = {}
 
 
+class TapSilent(Exception):
+    """The permission is granted but the tap gave no audio: nothing plays on the Mac, and a tap only starts delivering
+    once something does. Unlike a missing permission this fixes itself, so it is worth trying again."""
+    key = "error.tap_silent"
+
+    def __init__(self):
+        super().__init__("No sound from the Mac yet: streaming starts once something plays.")
+        self.vars = {}
+
+
 def _core_audio():
     """CoreAudio through ctypes, with the signatures the tap code needs."""
     import ctypes

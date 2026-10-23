@@ -125,5 +125,6 @@
   "capture.blackhole": "BlackHole",
   "capture.tap": "System audio (no BlackHole)",
   "capture.mute_mac": "Mute the Mac while streaming",
-  "error.tap_permission": "Mac Sonos needs the System Audio Recording permission (System Settings > Privacy & Security)."
+  "error.tap_permission": "Mac Sonos needs the System Audio Recording permission (System Settings > Privacy & Security).",
+  "error.tap_silent": "No sound from the Mac yet: streaming starts once something plays."
 }

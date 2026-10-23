@@ -90,6 +90,8 @@ class TapCapture:
                 return
             except tc.TapNoAudio:
                 continue
+        if tc.audio_permission() == "granted":   # allowed, just silent: the tap waits for something to play
+            raise tc.TapSilent() from None
         raise tc.TapPermissionError() from None
 
     def _open(self, tc):

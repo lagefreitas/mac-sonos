@@ -125,5 +125,6 @@
   "capture.blackhole": "BlackHole",
   "capture.tap": "Áudio do sistema (sem BlackHole)",
   "capture.mute_mac": "Silenciar o Mac ao transmitir",
-  "error.tap_permission": "O Mac Sonos precisa da permissão de Gravação de Áudio do Sistema (Ajustes do Sistema > Privacidade e Segurança)."
+  "error.tap_permission": "O Mac Sonos precisa da permissão de Gravação de Áudio do Sistema (Ajustes do Sistema > Privacidade e Segurança).",
+  "error.tap_silent": "Nenhum som do Mac ainda: o stream começa quando algo tocar."
 }

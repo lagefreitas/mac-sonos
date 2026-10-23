@@ -12,7 +12,7 @@ from .controller import ERROR, STREAMING, Controller
 from .core import output
 from .core.formats import FORMATS
 from .core.capture import BlackHoleCapture, KINDS as _CAPTURE_KINDS
-from .core.tapcapture import TapPermissionError
+from .core.tapcapture import TapPermissionError, TapSilent
 from .core.session import Session
 from .sonos import discovery
 
@@ -237,5 +237,5 @@ def main():
     args = p.parse_args()
     try:
         args.fn(args)
-    except (output.DeviceNotFound, discovery.RoomNotFound, TapPermissionError) as e:
+    except (output.DeviceNotFound, discovery.RoomNotFound, TapPermissionError, TapSilent) as e:
         sys.exit(str(e))

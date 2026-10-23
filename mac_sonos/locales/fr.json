@@ -125,5 +125,6 @@
   "capture.blackhole": "BlackHole",
   "capture.tap": "Audio système (sans BlackHole)",
   "capture.mute_mac": "Couper le son du Mac pendant la diffusion",
-  "error.tap_permission": "Mac Sonos a besoin de l'autorisation d'enregistrement de l'audio système (Réglages Système > Confidentialité et sécurité)."
+  "error.tap_permission": "Mac Sonos a besoin de l'autorisation d'enregistrement de l'audio système (Réglages Système > Confidentialité et sécurité).",
+  "error.tap_silent": "Pas encore de son du Mac : la diffusion commence dès que quelque chose joue."
 }

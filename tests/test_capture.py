@@ -151,11 +151,23 @@ class TapPermissionFlow(unittest.TestCase):
             self.c.start()
         self.request.assert_not_called()
 
-    def test_granted_but_still_silent_is_reported_as_permission_trouble_after_a_few_tries(self):
+    def test_granted_but_still_silent_is_reported_as_silence_after_a_few_tries(self):
+        """What happens for real when nothing plays on the Mac: the tap only delivers once something does."""
         FakeSource.outcomes = [tc.TapNoAudio("no audio")] * 4
-        with self.assertRaises(tc.TapPermissionError):
+        with self.assertRaises(tc.TapSilent):
             self.c.start()
         self.assertEqual(len(FakeSource.instances), 1 + capture.ATTEMPTS_AFTER_GRANT)
+
+    def test_still_silent_and_the_permission_unknown_is_reported_as_permission_trouble(self):
+        FakeSource.outcomes = [tc.TapNoAudio("no audio")] * 4
+        self.permission = "unavailable"
+        with self.assertRaises(tc.TapPermissionError):
+            self.c.start()
+
+    def test_silence_is_retried_but_a_missing_permission_is_not(self):
+        from mac_sonos.ui import model
+        self.assertTrue(model.should_retry("error", True, 11, error_key=tc.TapSilent.key))
+        self.assertFalse(model.should_retry("error", True, 999, error_key=tc.TapPermissionError.key))
 
     def test_a_permission_just_granted_takes_a_moment_to_apply(self):
         """What happened for real: the dialog was answered during the first attempt, and the next one, right away,
@@ -169,7 +181,7 @@ class TapPermissionFlow(unittest.TestCase):
     def test_the_attempts_are_spaced_out(self):
         FakeSource.outcomes = [tc.TapNoAudio("no audio")] * 4
         with mock.patch.object(capture, "RETRY_DELAY", 1.5), mock.patch.object(capture.time, "sleep") as sleep:
-            with self.assertRaises(tc.TapPermissionError):
+            with self.assertRaises(tc.TapSilent):
                 self.c.start()
         self.assertEqual([c.args for c in sleep.call_args_list], [(1.5,)] * capture.ATTEMPTS_AFTER_GRANT)
 
@@ -220,9 +232,10 @@ class TapPermissionFlow(unittest.TestCase):
     def test_the_error_is_localizable(self):
         e = tc.TapPermissionError()
         self.assertIn("System Audio Recording", str(e))
-        self.assertIn(e.key, i18n.catalog("pt"))
-        for lang in ("en", "es", "fr"):
-            self.assertIn(e.key, i18n.catalog(lang))
+        for error in (e, tc.TapSilent()):
+            for lang in ("pt", "en", "es", "fr"):
+                self.assertIn(error.key, i18n.catalog(lang))
+        self.assertEqual(str(tc.TapSilent()), i18n.catalog("en")[tc.TapSilent.key])
 
 
 class Conversion(unittest.TestCase):
