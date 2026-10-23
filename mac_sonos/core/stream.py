@@ -4,6 +4,7 @@ Each Sonos connection gets its own reader of the capture (see capture.py) and it
 starts at the live edge. ffmpeg's own avfoundation capture drops chunks of audio (vinyl crackle), so the audio is
 captured elsewhere and fed to ffmpeg through a pipe.
 """
+import contextlib
 import logging
 import queue
 import subprocess
@@ -15,13 +16,15 @@ from .formats import FORMATS, ffmpeg_cmd
 
 log = logging.getLogger("mac_sonos")
 
+QUEUE_BLOCKS = 500   # captured blocks waiting for ffmpeg (about 5 s); newer ones are dropped while it is full
+
 
 class StreamHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         cfg = self.server.cfg
         t0 = time.time()
         self.server.gets.append(t0)
-        pcm = queue.Queue(maxsize=500)
+        pcm = queue.Queue(maxsize=QUEUE_BLOCKS)
         first = []
         sent = 0
         log.info("stream: GET from %s", self.client_address[0])
@@ -64,8 +67,9 @@ class StreamHandler(BaseHTTPRequestHandler):
             log.exception("stream: failed")
         finally:
             log.info("stream: ended after %.1fs, %d bytes sent", time.time() - t0, sent)
-            pcm.put(None)
-            ff.kill()
+            ff.kill()   # first: a stalled client leaves ffmpeg, and feed() behind it, blocked with the queue full
+            with contextlib.suppress(queue.Full):
+                pcm.put_nowait(None)   # feed() may be waiting on an empty queue
             for pipe in (ff.stdin, ff.stdout):   # kill() alone leaves the pipes open and a zombie behind
                 try:
                     pipe.close()

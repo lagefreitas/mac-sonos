@@ -351,6 +351,72 @@ class StreamEndToEnd(unittest.TestCase):
         self.assertEqual(len(server.gets), 1)
 
 
+class StalledClient(unittest.TestCase):
+    """A client that stops reading fills the socket, then ffmpeg's pipes, then the queue of captured blocks. When it
+    finally drops the connection the handler must still end and take its ffmpeg along, instead of waiting forever
+    for a feeder that is itself stuck on ffmpeg."""
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg")
+    def test_the_handler_ends_and_kills_ffmpeg_after_a_stall(self):
+        import socket
+        import struct
+        import subprocess
+        from mac_sonos.core import stream
+
+        class Fast:   # far faster than real time, so the buffers fill in a moment
+            rate = 48000
+
+            @contextlib.contextmanager
+            def open(self, push):
+                stop = threading.Event()
+
+                def run():
+                    while not stop.is_set():
+                        push(b"\x01\x02" * 9600)
+                        time.sleep(0.002)
+                threading.Thread(target=run, daemon=True).start()
+                try:
+                    yield
+                finally:
+                    stop.set()
+
+        done, procs = threading.Event(), []
+
+        class Handler(StreamHandler):
+            def do_GET(self):
+                try:
+                    super().do_GET()
+                finally:
+                    done.set()
+
+        real_popen = subprocess.Popen
+
+        def popen(*args, **kwargs):
+            procs.append(real_popen(*args, **kwargs))
+            return procs[-1]
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.cfg = dict(capture=Fast(), fmt="wav", bitrate=None, lowlat=False)
+        server.gets = []
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        with mock.patch.object(stream, "QUEUE_BLOCKS", 5), mock.patch.object(stream.subprocess, "Popen", popen):
+            client = socket.socket()
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            client.connect(server.server_address)
+            client.sendall(b"GET /mac.wav HTTP/1.0\r\n\r\n")
+            time.sleep(2.5)   # never read
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            client.close()    # reset, as a speaker that gives up does
+            ended = done.wait(5)
+        for proc in procs:
+            self.addCleanup(proc.kill)
+        self.assertTrue(ended, "the handler is still blocked after the client left")
+        self.assertEqual(len(procs), 1)
+        self.assertIsNotNone(procs[0].poll(), "ffmpeg is still running")
+
+
 class ControllerModes(unittest.TestCase):
     def setUp(self):
         self.log = []
