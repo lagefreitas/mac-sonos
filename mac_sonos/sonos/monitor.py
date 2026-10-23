@@ -233,7 +233,7 @@ class Monitor:
 
     def room_command(self, room, action, arg=None):
         """Queue a room command: volume (0-100), volume_by (relative), mute (bool, None toggles), join
-        (arg: coordinator name of the group to join), unjoin, bass / treble (absolute) or bass_by / treble_by (relative), -10..10, loudness /
+        (arg: a room of the group to join, usually its coordinator), unjoin, bass / treble (absolute) or bass_by / treble_by (relative), -10..10, loudness /
         night_mode / dialog_mode / surround (bool, None toggles) or tv (soundbars: switch to the TV input). room=None with 'ungroup_all' splits every group."""
         self._commands.put(("room", room, action, arg))
 
@@ -465,10 +465,9 @@ class Monitor:
         elif action == "mute":
             zone.mute = (not zone.mute) if arg is None else bool(arg)
         elif action == "join":
-            group = self._groups.get(arg)
-            if not group:
-                raise LookupError(f"group {arg!r} not found")
-            zone.join(group.coordinator)
+            # by room, not by coordinator: right after an ungroup_all in the same batch, the room that will lead the
+            # group may still be listed as a member of its old one
+            zone.join(self._find_zone(arg))
         elif action == "unjoin":
             zone.unjoin()
         elif action in ("bass", "treble"):

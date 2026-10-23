@@ -260,6 +260,18 @@ class HouseTests(MonitorTests):
         self.m._step(100.0 + mon.TOPOLOGY_EVERY + 2)
         self.assertEqual(self.tv.calls[-1], ("unjoin",))
 
+    def test_join_after_ungroup_all_targets_a_room_that_was_only_a_member(self):
+        # what a scene sends: split everything, then build its groups. Office leads the new group but, until the
+        # topology is read again, it is still a member of the Living Room group
+        living = FakeZone("Living Room", "10.0.0.3", lambda: self.groups)
+        self.groups = [FakeGroup(living, [living, self.office]), FakeGroup(self.tv, [self.tv])]
+        self.m._step(100.0 + mon.TOPOLOGY_EVERY + 1)
+        self.m.room_command(None, "ungroup_all")
+        self.m.room_command("TV Room", "join", "Office")
+        self.m._step(100.0 + mon.TOPOLOGY_EVERY + 2)
+        self.assertEqual(self.office.calls, [("unjoin",)])
+        self.assertEqual(self.tv.calls, [("join", self.office)])
+
     def test_membership_commands_force_a_topology_refresh(self):
         self.m._next_topology = 999.0  # far in the future: only the command can trigger a refresh
         self.m.room_command("TV Room", "join", "Office")
