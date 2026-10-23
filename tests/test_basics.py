@@ -59,6 +59,27 @@ class Config(unittest.TestCase):
             p.write_text("{not json")
             self.assertEqual(config.load(p), config.DEFAULTS)
 
+    def test_a_corrupt_file_is_kept_aside_before_it_can_be_overwritten(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "c.json"
+            for text in ('{"scenes": [{"name": "Cin', '["not", "an", "object"]', "\udcff"):
+                p.write_bytes(text.encode("utf-8", "surrogateescape"))
+                with self.assertLogs("mac_sonos", level="WARNING"):
+                    self.assertEqual(config.load(p), config.DEFAULTS)
+                self.assertEqual((Path(d) / "c.json.bad").read_bytes(), p.read_bytes())
+
+    def test_save_replaces_the_file_whole_or_not_at_all(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "c.json"
+            config.save({**config.DEFAULTS, "rooms": ["Office"]}, p)
+            with mock.patch.object(config.os, "replace", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    config.save({**config.DEFAULTS, "rooms": ["TV Room"]}, p)
+            self.assertEqual(config.load(p)["rooms"], ["Office"])   # the old file is intact
+            config.save({**config.DEFAULTS, "rooms": ["TV Room"]}, p)
+            self.assertEqual(config.load(p)["rooms"], ["TV Room"])
+            self.assertEqual(sorted(x.name for x in Path(d).iterdir()), ["c.json"])   # no temporary file left
+
 
 class OutputSwitchRestore(unittest.TestCase):
     def run_switch(self, current, remembered):
