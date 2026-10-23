@@ -217,3 +217,43 @@ Not started; see `PLAN.md` for the reasoning behind each.
   in the Keychain, then search and play artists and albums from the music services (what the Sonos MCP connector does),
   and reach the favorites the local API cannot play (service hubs, artists). Only if the favorites turn out not to be
   enough.
+
+### From the code review (October 2026)
+
+Phase 1 of the review is done (stalled stream handler, volume errors, scene regrouping, long queues, atomic config,
+retry back-off and log rotation, silent tap). What is left:
+
+**Needs testing on the speakers**
+
+- **"Interrompido" must not stop other people's music.** `Session.stop` (`core/session.py`) calls `stop()` and
+  `unjoin()` without checking that the Sonos still plays our stream, so quitting, a scene with `"stream": "off"` or the
+  end of the sleep timer stops what someone put on the Office from the Sonos app. Changing room, format or capture
+  while interrupted (`ui/menubar.py`) restarts the stream over it too. Stop only if the leader's URI is ours, unjoin
+  only rooms still in its group, and while interrupted only save those choices.
+- **Restore the Mac's volume.** `OutputSwitch` (`core/output.py`) sets it to 100 for BlackHole and never puts it back,
+  so the Mac's speakers or headphones are left at 100%. Save it on enter, restore it on exit (and remember it next to
+  `previous_output` in case the app is killed).
+- **Event subscriptions after the Mac sleeps.** A failed renewal leaves a dead `Subscription` (`is_subscribed` false,
+  not reusable) in `Monitor._subs`, and nothing subscribes again, so the app falls back to polling until it is reopened.
+  Drop and redo subscriptions that are no longer subscribed.
+- **A leader inside another group.** SoCo's `play_uri` only works on a coordinator: if the Office is grouped under
+  another room the stream fails at every retry. In `Session.start`, `unjoin()` the leader first when it is not a
+  coordinator.
+- **Scene with the stream on while already streaming.** `wait_stream` (`scenes.py`) is satisfied by the old session,
+  so per-room volumes are sent before the restart and then overwritten by `Session.start`. Wait for a new session
+  (a generation counter or `started_at` in the controller's state).
+- **Start the tap in silence.** A tap delivers nothing until something plays, so in a silent Mac the stream starts
+  only on a later retry (`TapSilent`). With the permission granted, accept the tap without audio and send silence to
+  the Sonos until sound arrives; check that the Sonos accepts a stream that starts silent.
+
+**Later**
+
+- **Who can listen.** The stream is served on `0.0.0.0:8000` to any client and path, one ffmpeg per connection; with the
+  tap that is all of the Mac's audio. Use a random path per session (keep recognizing `/mac.mp3` in
+  `model.is_mac_stream` for saved scenes), 404 for anything else, a limit on connections, optionally only player IPs.
+- **Tap callback work.** The float-to-int16 conversion runs in Core Audio's real-time IOProc and competes for the GIL;
+  move it to a thread if the tap ever glitches. A change of the aggregate's sample rate (the Mac's output switched) is
+  not followed either.
+- **Clean-up.** The "EXPERIMENT" notes in `core/tapcapture.py` and the `tap-test` help; pin `soco`, `rumps` and
+  `pyobjc-*` in `requirements.txt`; read the Mac's volume (`osascript`) off the main thread; make `scenes.validate`
+  report hand-edited `rooms`/`source` that are not objects instead of raising; prune old album art from the cache.
