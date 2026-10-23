@@ -90,7 +90,10 @@ class Controller:
             try:
                 getattr(self, "_do_" + name)(**kwargs)
             except Exception as e:  # keep the worker alive whatever a command does
-                log.exception("%s failed", name)
+                if getattr(e, "key", None):   # an expected failure (no room, no device, no permission): one line
+                    log.warning("%s failed: %s", name, e)
+                else:
+                    log.exception("%s failed", name)
                 self._teardown()
                 self._set(status=ERROR, error=str(e), error_key=getattr(e, "key", None),
                           error_vars=getattr(e, "vars", None))

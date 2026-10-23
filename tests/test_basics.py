@@ -145,6 +145,20 @@ class MenuModel(unittest.TestCase):
         self.assertFalse(model.should_retry("error", False, 99))
         self.assertFalse(model.should_retry("streaming", True, 99))
 
+    def test_retries_back_off_up_to_five_minutes(self):
+        self.assertEqual([model.retry_delay(n) for n in (0, 1, 2, 3, 4, 5, 6, 50)], [10, 10, 20, 40, 80, 160, 300, 300])
+        self.assertFalse(model.should_retry("error", True, 30, failures=3))
+        self.assertTrue(model.should_retry("error", True, 40, failures=3))
+        self.assertTrue(model.should_retry("error", True, 301, failures=99))
+
+    def test_a_room_back_on_the_network_skips_the_back_off(self):
+        self.assertTrue(model.should_retry("error", True, 11, failures=8, rooms_back=True))
+        self.assertFalse(model.should_retry("error", True, 3, failures=8, rooms_back=True))
+
+    def test_a_missing_permission_is_not_retried(self):
+        self.assertFalse(model.should_retry("error", True, 999, error_key="error.tap_permission"))
+        self.assertTrue(model.should_retry("error", True, 999, error_key="error.device_not_found"))
+
     def test_every_volume_step_is_valid(self):
         self.assertTrue(all(0 < v <= 100 for v in model.VOLUME_STEPS))
 
@@ -272,6 +286,22 @@ class ControllerStates(unittest.TestCase):
         self.ctl.set_volume(30)
         self.ctl.start(["Office"])
         self.assertEqual(self.ctl.wait_for(controller.STREAMING, timeout=5).status, controller.STREAMING)
+
+    def test_expected_errors_are_logged_in_one_line_and_others_with_the_traceback(self):
+        controller.output.require_device.side_effect = controller.output.DeviceNotFound("no device")
+        with self.assertLogs("mac_sonos", level="WARNING") as logs:
+            self.ctl.start(["Office"])
+            self.ctl.wait_for(controller.ERROR, timeout=5)
+        failure = [r for r in logs.records if "failed" in r.getMessage()]
+        self.assertEqual(len(failure), 1)
+        self.assertIsNone(failure[0].exc_info)
+        self.assertIn("'no device' not found", failure[0].getMessage())
+        controller.output.require_device.side_effect = RuntimeError("a bug")
+        with self.assertLogs("mac_sonos", level="ERROR") as logs:
+            self.ctl.start(["Office"])
+            self.ctl.wait_for(controller.CONNECTING, timeout=5)   # the error of the first start is still showing
+            self.ctl.shutdown()
+        self.assertIsNotNone(logs.records[0].exc_info)
 
     def test_wait_for_times_out(self):
         self.assertIsNone(self.ctl.wait_for(controller.STREAMING, timeout=0.1))

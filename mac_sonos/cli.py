@@ -1,6 +1,7 @@
 """Command line: list rooms, run the stream, benchmark latency."""
 import argparse
 import logging
+import logging.handlers
 import os
 import signal
 import sys
@@ -131,12 +132,13 @@ def cmd_login_item(args):
 
 
 LOG_PATH = os.path.expanduser("~/Library/Logs/mac-sonos.log")
+LOG_BYTES, LOG_COPIES = 1_000_000, 3   # mac-sonos.log plus .1 to .3: at most about 4 MB
 
 
 def cmd_menubar(_):
     from .ui.menubar import MenuBarApp  # AppKit is only needed here
-    logging.basicConfig(filename=LOG_PATH, encoding="utf-8", level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(message)s")
+    handler = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=LOG_BYTES, backupCount=LOG_COPIES, encoding="utf-8")
+    logging.basicConfig(handlers=[handler], level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("mac_sonos").info("menu bar app starting")
     MenuBarApp().run()
 

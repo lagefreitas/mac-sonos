@@ -9,6 +9,8 @@ TITLES = {STOPPED: "🔈", CONNECTING: "🔄", STREAMING: "🔊", ERROR: "⚠️
 VOLUME_STEPS = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100]
 FORMAT_CHOICES = ["mp3", "aac"]
 RETRY_SECONDS = 10  # like the login loop: Wi-Fi, Sonos or BlackHole may not be ready yet
+RETRY_MAX_SECONDS = 300   # failures in a row double the wait up to this (the Mac may be away from the Sonos for hours)
+NO_RETRY_ERRORS = ("error.tap_permission",)   # only the user can fix these: trying again changes nothing
 
 
 def status_text(state, interrupted=False):
@@ -49,8 +51,17 @@ def volume_warning(mac_volume):
     return None
 
 
-def should_retry(status, want_stream, since_last_attempt):
-    return status == ERROR and want_stream and since_last_attempt >= RETRY_SECONDS
+def retry_delay(failures):
+    """Seconds to wait after `failures` failed attempts in a row: 10, 20, 40... up to RETRY_MAX_SECONDS."""
+    return min(RETRY_SECONDS * 2 ** max(failures - 1, 0), RETRY_MAX_SECONDS)
+
+
+def should_retry(status, want_stream, since_last_attempt, failures=1, error_key=None, rooms_back=False):
+    """Whether to start again after an error. `rooms_back`: the rooms that were missing are on the network again,
+    so the back-off is skipped."""
+    if status != ERROR or not want_stream or error_key in NO_RETRY_ERRORS:
+        return False
+    return since_last_attempt >= (RETRY_SECONDS if rooms_back else retry_delay(failures))
 
 
 # --- now playing ---------------------------------------------------------------------------------

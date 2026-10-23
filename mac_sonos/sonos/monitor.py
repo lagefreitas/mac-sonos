@@ -338,10 +338,12 @@ class Monitor:
 
     def _subscribe(self, zone):
         try:
-            for name in ("avTransport", "renderingControl"):  # what plays, and volume/mute
-                if (zone.ip_address, name) not in self._subs:
-                    self._subs[(zone.ip_address, name)] = getattr(zone, name).subscribe(auto_renew=True)
-            log.info("monitor: subscribed to events of %s", zone.player_name)
+            new = [name for name in ("avTransport", "renderingControl")  # what plays, and volume/mute
+                   if (zone.ip_address, name) not in self._subs]
+            for name in new:
+                self._subs[(zone.ip_address, name)] = getattr(zone, name).subscribe(auto_renew=True)
+            if new:
+                log.info("monitor: subscribed to events of %s", zone.player_name)
         except Exception:
             if self.events_ok:
                 log.warning("event subscription failed; polling only", exc_info=True)

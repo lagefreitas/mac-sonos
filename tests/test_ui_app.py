@@ -97,6 +97,35 @@ class AppTests(unittest.TestCase):
     def children(self, item):
         return {i.title: i for i in item.values() if getattr(i, "title", None)}
 
+    def test_retries_back_off_and_resume_when_the_room_is_seen_again(self):
+        from mac_sonos.controller import State
+        app = self.make_app()
+        app._start = mock.Mock(side_effect=lambda: setattr(app, "last_attempt", now[0]))
+        app.want_stream, app.ticks = True, 5
+        now = [1000.0]
+        app.last_attempt = now[0]
+        app.ctl.state = State(status="error", rooms=["Office"], error_key="error.room_not_found")
+        with mock.patch.object(menubar.time, "time", lambda: now[0]):
+            for at in (1005, 1011, 1015, 1021, 1032, 1052):   # failures 1, 2, 3: waits of 10, 20, 40 s
+                now[0] = at
+                app._tick(None)
+            self.assertEqual(app._start.call_count, 2)
+            self.assertEqual(app.failures, 3)
+            now[0] = 1062
+            app._tick(None)
+            self.assertEqual(app._start.call_count, 2)     # 30 s of 40: still waiting
+            app.groups = self.groups()                     # the monitor sees the Office again
+            app._tick(None)
+            self.assertEqual(app._start.call_count, 3)
+
+    def test_starting_by_hand_forgets_the_earlier_failures(self):
+        app = self.make_app()
+        app._start = mock.Mock()
+        app.failures = 6
+        app.on_toggle(None)
+        self.assertEqual(app.failures, 0)
+        app._start.assert_called_once_with()
+
     def test_library_menu_structure(self):
         app = self.library_app()
         top = self.children(app.library_menu)

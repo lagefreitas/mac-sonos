@@ -7,7 +7,7 @@ import time
 import rumps
 
 from .. import config, i18n, scenes
-from ..controller import CONNECTING, STREAMING, Controller
+from ..controller import CONNECTING, ERROR, STREAMING, Controller
 from ..core import capture as capture_mod, output
 from ..i18n import t
 from ..sonos import art, discovery
@@ -27,6 +27,8 @@ class MenuBarApp(rumps.App):
         self.ctl = Controller()
         self.want_stream = self.cfg["autostart_stream"]
         self.last_attempt = 0.0
+        self.failures = 0           # attempts in a row that ended in an error, for the retry back-off
+        self._failed_attempt = None  # the attempt (its last_attempt) already counted in `failures`
         self.discovered = None  # set by the discovery thread, consumed in _tick
         self.known_rooms = []
         self.ticks = 0
@@ -155,6 +157,7 @@ class MenuBarApp(rumps.App):
             self.want_stream = False
             self.ctl.stop()
         else:
+            self.failures = 0   # asked for by hand: no back-off left over from earlier failures
             self._start()
 
     def on_room(self, sender):
@@ -747,6 +750,17 @@ class MenuBarApp(rumps.App):
             self.track_item.title = f"♪ {model.shorten(model.track_text(primary), 40)} · {model.group_name(primary)}"
         return primary
 
+    def _count_failure(self, state):
+        if state.status == STREAMING:
+            self.failures = 0
+        elif state.status == ERROR and self._failed_attempt != self.last_attempt:
+            self.failures, self._failed_attempt = self.failures + 1, self.last_attempt
+
+    def _rooms_back(self, state):
+        """The rooms the last attempt could not find are seen by the monitor again: worth trying at once."""
+        present = {m for g in self.groups for m in g.members}
+        return state.error_key == "error.room_not_found" and bool(state.rooms) and set(state.rooms) <= present
+
     def _tick(self, _):
         try:
             self._tick_once()
@@ -761,7 +775,9 @@ class MenuBarApp(rumps.App):
             self._rebuild_rooms()
         if self.want_stream and self.ticks == 1 and state.status == "stopped":
             self._start()  # first tick: start once the menu is on screen
-        if model.should_retry(state.status, self.want_stream, time.time() - self.last_attempt):
+        self._count_failure(state)
+        if model.should_retry(state.status, self.want_stream, time.time() - self.last_attempt, self.failures,
+                              state.error_key, self._rooms_back(state)):
             self._start()
         interrupted = model.is_interrupted(state, self.groups, time.time())
         if interrupted != self.interrupted:

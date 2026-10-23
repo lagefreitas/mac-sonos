@@ -191,6 +191,14 @@ class MonitorTests(unittest.TestCase):
         self.m._step(100.0)
         self.assertEqual(self.office.calls[-1], ("seek", "0:03:19"))
 
+    def test_subscriptions_are_logged_once_not_at_every_rediscovery(self):
+        m = Monitor()   # a fresh one: the subclasses' setUp has already subscribed self.m
+        with self.assertLogs("mac_sonos", level="INFO") as logs:
+            m._step(100.0)
+            m._step(100.0 + mon.REDISCOVER_EVERY + 1)
+        subscribed = [r for r in logs.output if "subscribed to events" in r]
+        self.assertEqual(len(subscribed), 2)   # Office and TV Room, once each
+
     def test_a_failing_zone_does_not_break_the_others(self):
         self.m._step(100.0)
         self.office.get_current_transport_info = mock.Mock(side_effect=OSError("down"))
