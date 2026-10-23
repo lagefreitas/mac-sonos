@@ -222,6 +222,31 @@ class ControllerStates(unittest.TestCase):
         self.ctl.wait_for(controller.STOPPED, timeout=5)
         self.assertEqual(speaker.volume, 30)
 
+    def test_a_room_that_fails_a_volume_change_does_not_end_the_stream(self):
+        class Offline:
+            player_name = "Office"
+
+            @property
+            def volume(self):
+                return 0
+
+            @volume.setter
+            def volume(self, value):
+                raise OSError("timed out")
+
+        class Speaker:
+            volume = 0
+        self.ctl.start(["Office", "TV Room"])
+        self.ctl.wait_for(controller.STREAMING, timeout=5)
+        session, speaker = FakeSession.instances[0], Speaker()
+        session.rooms = [Offline(), speaker]
+        self.ctl.set_volume(30)
+        self.ctl.stop(volume=20)   # restoring the volume after a fade fails the same way
+        self.ctl.shutdown()        # the volume is restored after STOPPED: wait for the worker to finish
+        self.assertEqual(speaker.volume, 20)
+        self.assertNotIn(controller.ERROR, self.seen)
+        self.assertEqual(self.seen, [controller.CONNECTING, controller.STREAMING, controller.STOPPED])
+
     def test_set_volume_without_session_is_harmless(self):
         self.ctl.set_volume(30)
         self.ctl.start(["Office"])

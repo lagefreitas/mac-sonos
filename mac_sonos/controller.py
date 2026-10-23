@@ -112,8 +112,7 @@ class Controller:
     def _do_set_volume(self, volume):
         if self._session:
             self._session.volume = volume
-            for speaker in self._session.rooms:
-                speaker.volume = volume
+            _set_volumes(self._session.rooms, volume)
 
     def _do_stop(self, volume=None):
         had_session = self._session is not None
@@ -122,8 +121,7 @@ class Controller:
         if had_session or self.state.status in (CONNECTING, STREAMING):
             self._set(status=STOPPED, url=None)
         if volume is not None:
-            for speaker in rooms:
-                speaker.volume = volume
+            _set_volumes(rooms, volume)
 
     def _teardown(self):
         session, stack, self._session, self._stack = self._session, self._stack, None, None
@@ -131,3 +129,12 @@ class Controller:
             session.stop()
         if stack:
             stack.close()
+
+
+def _set_volumes(speakers, volume):
+    """Set each room's volume; a room that does not answer is logged and skipped, it must not end the stream."""
+    for speaker in speakers:
+        try:
+            speaker.volume = volume
+        except Exception:
+            log.warning("setting the volume of %s failed", getattr(speaker, "player_name", speaker), exc_info=True)
