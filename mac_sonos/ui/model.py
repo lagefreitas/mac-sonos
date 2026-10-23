@@ -277,12 +277,17 @@ def favorite_sections(favorites):
     return out
 
 
-def queue_window(entries, current_index, size=QUEUE_WINDOW):
-    """(shown entries, hidden before, hidden after): a window of `size` entries around the current one."""
+def queue_window(entries, current_index, size=QUEUE_WINDOW, total=None):
+    """(shown entries, hidden before, hidden after): a window of `size` entries around the current one.
+    `entries` may be only part of the queue (their `index` says where it starts) and `total` its full length."""
+    entries = list(entries)
+    offset = entries[0].index if entries else 0
+    total = offset + len(entries) if total is None else total
     if len(entries) <= size:
-        return list(entries), 0, 0
-    start = max(0, min((current_index if current_index >= 0 else 0) - size // 8, len(entries) - size))
-    return list(entries[start:start + size]), start, len(entries) - start - size
+        return entries, offset, max(0, total - offset - len(entries))
+    current = (current_index if current_index >= 0 else 0) - offset
+    start = max(0, min(current - size // 8, len(entries) - size))
+    return entries[start:start + size], offset + start, max(0, total - offset - start - size)
 
 
 def queue_entry_text(entry, current):

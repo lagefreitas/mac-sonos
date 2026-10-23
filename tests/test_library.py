@@ -80,8 +80,15 @@ class FakeZone:
     def remove_from_queue(self, index):
         self.calls.append(("remove_from_queue", index))
 
-    def get_queue(self, max_items=100):
-        return self.queue[:max_items]
+    def get_queue(self, start=0, max_items=100):
+        page = QueuePage(self.queue[start:start + max_items])
+        page.total_matches = len(self.queue)
+        return page
+
+
+class QueuePage(list):
+    """What SoCo's get_queue returns: a page of the queue that knows the length of the whole."""
+    total_matches = 0
 
 
 class Playing(unittest.TestCase):
@@ -150,6 +157,37 @@ class LibraryJobs(unittest.TestCase):
         self.assertEqual(len(self.lib.queues["Office"]), 2)
         self.lib._step(None, 1000.0 + lib.QUEUE_EVERY + 1)
         self.assertEqual(len(self.lib.queues["Office"]), 3)
+
+    def test_favorites_are_in_place_when_the_change_is_announced(self):
+        seen = []
+        self.lib._on_change = lambda: seen.append([f.title for f in self.lib.favorites])
+        self.lib._step(None, 1000.0)
+        self.assertEqual(seen, [["Radio"]])
+
+    def test_a_long_queue_is_read_around_the_current_track(self):
+        self.zone.queue = [SimpleNamespace(title=f"T{i}", creator="") for i in range(300)]
+        self.lib.watch("Office", 150)
+        self.lib._step(self.lib._jobs.get_nowait(), 1000.0)
+        entries = self.lib.queues["Office"]
+        self.assertEqual((entries[0].index, entries[-1].index, len(entries)), (139, 238, lib.QUEUE_LIMIT))
+        self.assertEqual(entries[10], QueueEntry(149, "T149", ""))   # the current track, 1-based 150
+        self.assertEqual(self.lib.queue_totals["Office"], 300)
+
+    def test_the_window_is_read_again_only_when_the_track_leaves_it(self):
+        self.zone.queue = [SimpleNamespace(title=f"T{i}", creator="") for i in range(300)]
+        self.lib.watch("Office", 1)
+        self.lib._step(self.lib._jobs.get_nowait(), 1000.0)
+        self.lib.watch("Office", 30)    # still well inside the first 100
+        self.assertEqual(self.lib._jobs.qsize(), 0)
+        self.lib.watch("Office", 80)    # too close to the end of what was read
+        self.lib.watch("Office", 81)    # a second tick before the job ran: no second job
+        self.assertEqual(self.lib._jobs.qsize(), 1)
+        self.lib._step(self.lib._jobs.get_nowait(), 1001.0)
+        self.assertEqual(self.lib.queues["Office"][0].index, 70)
+        self.lib.watch("Office", 299)   # near the end of the queue: covered once the last entry is in
+        self.lib._step(self.lib._jobs.get_nowait(), 1002.0)
+        self.lib.watch("Office", 300)
+        self.assertEqual(self.lib._jobs.qsize(), 0)
 
     def test_watching_the_same_group_twice_queues_one_job(self):
         self.lib.watch("Office")
@@ -229,6 +267,14 @@ class LibraryModel(unittest.TestCase):
         self.assertEqual((shown[-1].index, after), (99, 0))
         shown, _, _ = model.queue_window(entries, -1)  # no current track
         self.assertEqual(shown[0].index, 0)
+
+    def test_queue_window_of_a_part_of_the_queue(self):
+        part = [QueueEntry(i, f"t{i}") for i in range(139, 239)]   # what the library read, of 300
+        shown, before, after = model.queue_window(part, 149, total=300)
+        self.assertEqual(shown[0].index, 144)                     # size // 8 = 5 before the current one
+        self.assertEqual((len(shown), before, after), (40, 144, 300 - 184))
+        shown, before, after = model.queue_window(part[:30], 149, total=300)
+        self.assertEqual((len(shown), before, after), (30, 139, 300 - 169))
 
     def test_queue_entry_text(self):
         self.assertEqual(model.queue_entry_text(QueueEntry(0, "Bubbly", "Eliza"), False), "1. Bubbly – Eliza")

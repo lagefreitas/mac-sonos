@@ -646,11 +646,12 @@ class MenuBarApp(rumps.App):
         target = self._target()
         room = model.target_room_name(self.groups, self.cfg["rooms"], self.cfg["play_target"])
         queue = self.library.queues.get(target.coordinator, ()) if target else ()
+        total = self.library.queue_totals.get(target.coordinator) if target else None
         position = target.queue_position if target else 0
-        return target, room, queue, position
+        return target, room, queue, total, position
 
     def _rebuild_library(self):
-        target, room, entries, position = self._library_state()
+        target, room, entries, total, position = self._library_state()
         menu = self.library_menu
         if len(menu):
             menu.clear()
@@ -682,7 +683,7 @@ class MenuBarApp(rumps.App):
         menu.add(playlists)
         # queue of the target group
         queue = rumps.MenuItem(t("menu.queue"))
-        shown, before, after = model.queue_window(entries, position - 1)
+        shown, before, after = model.queue_window(entries, position - 1, total=total)
         if before:
             queue.add(rumps.MenuItem(t("queue.before", n=before)))
         for entry in shown:
@@ -716,9 +717,9 @@ class MenuBarApp(rumps.App):
         menu.add(radios)
 
     def _update_library(self):
-        target, room, entries, position = self._library_state()
+        target, room, entries, total, position = self._library_state()
         if target:
-            self.library.watch(target.coordinator)
+            self.library.watch(target.coordinator, position)
         key = (self.library.version, room, position, target.coordinator if target else None,
                tuple(sorted({m for g in self.groups for m in g.members})), repr(self.cfg["radio_urls"]))
         if key != self._library_key:

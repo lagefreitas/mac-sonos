@@ -16,7 +16,8 @@ RADIO, TRACK, PLAYLIST = "radio", "track", "playlist"
 RADIO_SCHEMES = ("x-sonosapi-stream:", "x-sonosapi-radio:", "x-rincon-mp3radio:", "x-sonosapi-hls:")
 LIBRARY_EVERY = 300.0   # seconds between full reloads of favorites and playlists
 QUEUE_EVERY = 15.0      # seconds between reloads of a watched queue
-QUEUE_LIMIT = 100
+QUEUE_LIMIT = 100       # queue entries read at a time, around the current track
+QUEUE_LEAD = 10         # of which this many come before it
 
 
 @dataclass(frozen=True)
@@ -102,10 +103,13 @@ class Library:
         self._zone_for_group, self._any_zone = zone_for_group, any_zone
         self._on_change, self._refresh_group = on_change, refresh_group
         self.favorites, self.playlists = [], []
-        self.queues = {}               # coordinator name -> tuple of QueueEntry
+        self.queues = {}               # coordinator name -> tuple of QueueEntry (a window of the queue)
+        self.queue_totals = {}         # coordinator name -> length of the whole queue
         self.version = 0               # bumps whenever favorites, playlists or a queue change
         self._jobs = queue.Queue()
         self._watched = None           # coordinator whose queue we keep fresh
+        self._position = 0             # its current track (1-based, 0: unknown): the window is read around it
+        self._requested = None         # coordinator whose queue a job is already on its way to read
         self._next_library = self._next_queue = 0.0
         self._stop = threading.Event()
         self._thread = None
@@ -124,11 +128,22 @@ class Library:
 
     # --- requests from the UI (non-blocking) ----------------------------------------------------
 
-    def watch(self, coordinator):
-        """Keep this group's queue fresh; reloads it at once."""
-        if coordinator != self._watched:
-            self._watched = coordinator
+    def watch(self, coordinator, position=0):
+        """Keep this group's queue fresh around its current track (1-based `position`); reloads it at once when
+        the group changes or the track leaves the window that was read."""
+        self._position = position
+        if coordinator != self._watched or (not self._covers(coordinator, position) and self._requested != coordinator):
+            self._watched = self._requested = coordinator
             self._jobs.put(("queue", coordinator))
+
+    def _covers(self, coordinator, position):
+        entries = self.queues.get(coordinator)
+        if not entries or position <= 0:
+            return True   # nothing read yet (a job is on its way), or no current track to follow
+        first, last = entries[0].index, entries[-1].index
+        start = max(0, position - 1 - QUEUE_LEAD)
+        end = min(position - 1 + QUEUE_LIMIT // 2, self.queue_totals.get(coordinator, last + 1) - 1)
+        return first <= start and end <= last
 
     def reload(self):
         self._jobs.put(("library", None))
@@ -192,21 +207,28 @@ class Library:
             return
         favorites = favorites_from(zone.music_library.get_sonos_favorites(complete_result=True))
         playlists = list(zone.get_sonos_playlists(complete_result=True))
-        if [(f.title, f.kind) for f in favorites] != [(f.title, f.kind) for f in self.favorites] or \
-                [p.title for p in playlists] != [p.title for p in self.playlists]:
+        changed = [(f.title, f.kind) for f in favorites] != [(f.title, f.kind) for f in self.favorites] or \
+            [p.title for p in playlists] != [p.title for p in self.playlists]
+        self.favorites, self.playlists = favorites, playlists
+        if changed:   # only now: the menu rebuilds as soon as it sees the new version
             log.info("library: %d favorites, %d playlists", len(favorites), len(playlists))
             self._bump()
-        self.favorites, self.playlists = favorites, playlists
 
     def _load_queue(self, coordinator, now):
         self._next_queue = now + QUEUE_EVERY
+        self._requested = None
         zone = self._zone_for_group(coordinator)
         if zone is None:
             return
-        entries = tuple(QueueEntry(i, getattr(t, "title", "") or "", getattr(t, "creator", "") or "")
-                        for i, t in enumerate(zone.get_queue(max_items=QUEUE_LIMIT)))
-        if entries != self.queues.get(coordinator):
-            self.queues[coordinator] = entries
+        position = self._position if coordinator == self._watched else 0
+        start = max(0, position - 1 - QUEUE_LEAD)
+        items = zone.get_queue(start=start, max_items=QUEUE_LIMIT)
+        entries = tuple(QueueEntry(start + i, getattr(t, "title", "") or "", getattr(t, "creator", "") or "")
+                        for i, t in enumerate(items))
+        total = getattr(items, "total_matches", None)
+        total = int(total) if total is not None else start + len(entries)
+        if entries != self.queues.get(coordinator) or total != self.queue_totals.get(coordinator):
+            self.queues[coordinator], self.queue_totals[coordinator] = entries, total
             self._bump()
 
     def _do(self, coordinator, action, now):

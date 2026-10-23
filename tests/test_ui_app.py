@@ -109,7 +109,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("Limpar fila", queue)
         self.assertEqual(list(self.children(queue["1. Bubbly – Eliza"])), ["Tocar", "Remover"])
         self.assertEqual(list(self.children(top["Rádios por URL"])), ["Tocar URL…", "Adicionar rádio…"])
-        app.library.watch.assert_called_with("Office")
+        app.library.watch.assert_called_with("Office", 2)   # its current track: the queue is read around it
 
     def test_library_items_play_on_the_target_group(self):
         app = self.library_app()
@@ -136,7 +136,7 @@ class AppTests(unittest.TestCase):
         app._tick(None)
         self.assertEqual(config.load()["play_target"], "TV Room")
         self.assertIn("Tocar em: TV Room", self.children(app.library_menu))
-        app.library.watch.assert_called_with("TV Room")
+        app.library.watch.assert_called_with("TV Room", 0)
         radios = self.children(self.children(self.children(app.library_menu)["Favoritos"])["Rádios (2)"])
         radios["BBC 3"].callback(None)
         self.assertEqual(app.library.play_favorite.call_args.args[0], "TV Room")
